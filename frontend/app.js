@@ -207,7 +207,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
   // 1. Destrói o player anterior de forma garantida
   destroyActivePlayer();
 
-  // 2. Atualiza o título do vídeo atual no player usando o nome amigável ou título do filme
+  // 2. Atualiza o título do vídeo atual no player
   const playingFileTitle = document.getElementById('playing-file-title');
   if (media.media_type === 'movie') {
     playingFileTitle.textContent = media.title || media.torrent_title || 'Filme';
@@ -229,7 +229,23 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     console.error('Erro ao buscar configurações de transcodificação:', e);
   }
 
-  // 4. Monta a URL de stream do backend
+  // 4. Se a transcodificação estiver ativa, busca as faixas de áudio via ffprobe antes de criar o player
+  let audioTracks = [];
+  if (transcodeAudio) {
+    try {
+      const tracksRes = await fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (tracksRes.ok) {
+        const tData = await tracksRes.json();
+        audioTracks = tData.streams || [];
+      }
+    } catch (e) {
+      console.error('Erro ao buscar trilhas de áudio via ffprobe:', e);
+    }
+  }
+
+  // 5. Monta a URL de stream do backend
   let streamUrl = `/api/stream/${streamMagnetId}/${fileIndex}`;
   if (transcodeAudio && targetAudioTrack !== null) {
     streamUrl += `?audioTrack=${targetAudioTrack}`;
@@ -238,7 +254,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     }
   }
 
-  // 5. Cria o novo elemento <video> no DOM
+  // 6. Cria o novo elemento <video> no DOM
   const root = document.getElementById('unique-player-root');
   root.innerHTML = ''; // Remove o placeholder
 
@@ -264,7 +280,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
 
   videoElement.appendChild(sourceElement);
 
-  // 6. Injeta as legendas encontradas no torrent dinamicamente
+  // 7. Injeta as legendas encontradas no torrent dinamicamente
   if (currentSubtitles && currentSubtitles.length > 0) {
     currentSubtitles.forEach((sub) => {
       const track = document.createElement('track');
@@ -301,7 +317,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
 
   root.appendChild(videoElement);
 
-  // 7. Instancia a biblioteca Plyr
+  // 8. Instancia a biblioteca Plyr
   activePlayer = new Plyr(videoElement, {
     controls: [
       'play-large', 'play', 'progress', 'current-time', 'duration',
@@ -324,7 +340,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     }
   });
 
-  // 8. Lógica de faixas de áudio dinâmicas e transcodificação
+  // 9. Lógica de faixas de áudio dinâmicas e transcodificação
   const audioTracksContainer = document.getElementById('player-audio-tracks-container');
   const audioTracksButtons = document.getElementById('audio-tracks-buttons');
   
@@ -332,58 +348,8 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     audioTracksContainer.style.display = 'none';
     audioTracksButtons.innerHTML = '';
 
-    if (transcodeAudio) {
-      // Busca as trilhas do FFprobe via backend
-      try {
-        const tracksRes = await fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-        if (tracksRes.ok) {
-          const tData = await tracksRes.json();
-          const streams = tData.streams || [];
-          
-          if (streams.length > 0) {
-            audioTracksContainer.style.display = 'flex';
-            audioTracksContainer.style.flexDirection = 'row';
-            audioTracksContainer.style.alignItems = 'center';
-            audioTracksContainer.style.gap = '12px';
-            
-            streams.forEach((stream) => {
-              const btn = document.createElement('button');
-              btn.type = 'button';
-              
-              // Se nenhuma faixa foi selecionada ainda, a primeira (index 0) é a ativa
-              const isActive = (targetAudioTrack === null && stream.index === 0) || (targetAudioTrack !== null && stream.index === parseInt(targetAudioTrack, 10));
-              btn.className = isActive ? 'btn btn-primary' : 'btn btn-secondary';
-              btn.style.padding = '4px 12px';
-              btn.style.fontSize = '0.8rem';
-              btn.style.height = 'auto';
-              btn.style.minHeight = 'unset';
-              
-              // Traduz idiomas conhecidos
-              let langLabel = stream.language.toUpperCase();
-              if (langLabel === 'POR' || langLabel === 'PTB' || langLabel === 'PT') langLabel = 'Português';
-              else if (langLabel === 'ENG' || langLabel === 'EN') langLabel = 'Inglês';
-              else if (langLabel === 'SPA' || langLabel === 'ES') langLabel = 'Espanhol';
-              else if (langLabel === 'JPN' || langLabel === 'JA') langLabel = 'Japonês';
-              
-              btn.textContent = `${langLabel} (${stream.title})`;
-
-              btn.addEventListener('click', () => {
-                const currentTime = activePlayer ? activePlayer.currentTime : 0;
-                console.log(`[Transcode] Mudando para áudio #${stream.index} a partir de ${currentTime}s...`);
-                initPlayer(media, streamMagnetId, fileIndex, fileName, stream.index, currentTime);
-              });
-
-              audioTracksButtons.appendChild(btn);
-            });
-          }
-        }
-      } catch (e) {
-        console.error('Erro ao carregar faixas de áudio via ffprobe:', e);
-      }
-    } else {
-      // Se a transcodificação estiver desativada, exibe o aviso do Chrome e as opções do VLC
+    if (!transcodeAudio) {
+      // Se a transcodificação estiver desativada nas configurações, exibe o aviso do Chrome e as opções do VLC
       audioTracksContainer.style.display = 'flex';
       audioTracksContainer.style.flexDirection = 'column';
       audioTracksContainer.style.alignItems = 'flex-start';
@@ -428,7 +394,7 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     }
   }
 
-  // 9. Tratamento de Seek para Streams Transcodificados
+  // 10. Tratamento de Seek para Streams Transcodificados
   if (transcodeAudio && targetAudioTrack !== null) {
     let lastTime = startTime;
     
@@ -447,12 +413,62 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     });
   }
 
-  // Tenta iniciar a reprodução automática amigavelmente
+  // Injeta o seletor de áudio dentro do menu nativo do Plyr no evento ready
   activePlayer.on('ready', () => {
     activePlayer.play().catch(() => {
       console.log('Autoplay bloqueado pelo navegador, aguardando clique.');
     });
+
+    if (transcodeAudio && audioTracks.length > 1) {
+      const menu = videoElement.closest('.plyr').querySelector('.plyr__menu__container [role="menu"]');
+      if (menu) {
+        // Evita botões duplicados
+        if (!menu.querySelector('#plyr-custom-audio-item')) {
+          const audioItem = document.createElement('button');
+          audioItem.type = 'button';
+          audioItem.className = 'plyr__control';
+          audioItem.id = 'plyr-custom-audio-item';
+          audioItem.setAttribute('role', 'menuitem');
+          
+          // Encontra a trilha atualmente selecionada
+          const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
+          const activeTrack = audioTracks.find(t => t.index === activeTrackIndex) || audioTracks[0];
+          const friendlyLang = getFriendlyLanguage(activeTrack.language);
+
+          audioItem.innerHTML = `
+            <span>Áudio</span>
+            <span class="plyr__menu__value" style="color: var(--primary); font-weight: 600;">${friendlyLang} (${activeTrack.title})</span>
+          `;
+
+          // Evento de clique para ciclar entre as faixas de áudio disponíveis
+          audioItem.addEventListener('click', () => {
+            const currentIndex = audioTracks.indexOf(activeTrack);
+            const nextIndex = (currentIndex + 1) % audioTracks.length;
+            const nextTrack = audioTracks[nextIndex];
+            
+            const currentTime = activePlayer.currentTime;
+            console.log(`[Transcode Menu] Alterando faixa de áudio no player para #${nextTrack.index} (${nextTrack.language}) a partir de ${currentTime}s...`);
+            initPlayer(media, streamMagnetId, fileIndex, fileName, nextTrack.index, currentTime);
+          });
+
+          menu.appendChild(audioItem);
+        }
+      }
+    }
   });
+}
+
+// Helper para traduzir códigos de idiomas comuns para formato amigável no menu do player
+function getFriendlyLanguage(lang) {
+  const l = (lang || '').toLowerCase().trim();
+  if (l === 'por' || l === 'ptb' || l === 'pt' || l === 'portuguese' || l === 'por-br') return 'Português';
+  if (l === 'eng' || l === 'en' || l === 'english') return 'Inglês';
+  if (l === 'spa' || l === 'es' || l === 'spanish') return 'Espanhol';
+  if (l === 'jpn' || l === 'ja' || l === 'japanese') return 'Japonês';
+  if (l === 'fra' || l === 'fr' || l === 'french') return 'Francês';
+  if (l === 'ger' || l === 'de' || l === 'german') return 'Alemão';
+  if (l === 'ita' || l === 'it' || l === 'italian') return 'Italiano';
+  return lang.toUpperCase();
 }
 
 // ==================== CHAMADAS DE API E RENDERIZAÇÃO ==================== //
