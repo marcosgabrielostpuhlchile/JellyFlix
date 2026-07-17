@@ -1,4 +1,6 @@
 import express from 'express';
+import { spawn } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
 import db from '../db.js';
 import { addTorrent } from '../torrent-manager.js';
 
@@ -22,13 +24,78 @@ router.get('/:id/:fileIndex', async (req, res) => {
   const { id, fileIndex } = req.params;
   const idx = parseInt(fileIndex, 10);
 
+  const noTranscode = req.query.noTranscode === 'true';
+  const audioTrackIdx = req.query.audioTrack;
+  const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
+  const transcodeEnabled = transcodeRow && transcodeRow.value === '1';
+
   try {
     const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
     if (!magnet) {
       return res.status(404).json({ error: 'Magnet não cadastrado.' });
     }
 
-    // Carrega/Recupera o torrent no cliente WebTorrent
+    // Se a transcodificação estiver ativa e houver uma faixa de áudio selecionada (e não for a chamada interna do FFmpeg)
+    if (!noTranscode && transcodeEnabled && audioTrackIdx !== undefined) {
+      const audioIdx = parseInt(audioTrackIdx, 10);
+      const startTime = parseFloat(req.query.startTime || 0);
+
+      // Define a URL interna para o FFmpeg ler o stream direto (com noTranscode=true)
+      const internalStreamUrl = `http://localhost:${process.env.PORT || 3000}/api/stream/${id}/${fileIndex}?noTranscode=true`;
+
+      console.log(`[Transcode] Iniciando FFmpeg para áudio #${audioIdx} a partir de ${startTime}s...`);
+
+      // Configura os cabeçalhos de resposta para streaming contínuo de MP4 fragmentado
+      res.writeHead(200, {
+        'Content-Type': 'video/mp4',
+        'Transfer-Encoding': 'chunked',
+        'Access-Control-Allow-Origin': '*'
+      });
+
+      // Spawna o FFmpeg usando o binário local do ffmpeg-static
+      const ffmpegProcess = spawn(ffmpegPath, [
+        '-ss', startTime.toString(), // Seek rápido na entrada
+        '-i', internalStreamUrl,     // URL local de stream direto do torrent
+        '-map', '0:v:0',              // Copia o primeiro stream de vídeo
+        '-map', `0:a:${audioIdx}`,    // Mapeia a trilha de áudio selecionada
+        '-c:v', 'copy',               // Copia vídeo sem processar (0% CPU de vídeo)
+        '-c:a', 'aac',                // Transcodifica áudio para AAC
+        '-b:a', '192k',               // Bitrate do áudio
+        '-f', 'mp4',                  // Output em MP4 fragmentado
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'                      // Saída via stdout
+      ]);
+
+      ffmpegProcess.stdout.pipe(res);
+
+      let killed = false;
+      const cleanup = () => {
+        if (!killed) {
+          killed = true;
+          console.log('[Transcode] Encerrando processo do FFmpeg.');
+          try {
+            ffmpegProcess.kill('SIGKILL');
+          } catch (e) {
+            console.error('[Transcode] Erro ao matar FFmpeg:', e.message);
+          }
+        }
+      };
+
+      req.on('close', cleanup);
+      res.on('finish', cleanup);
+      ffmpegProcess.on('close', cleanup);
+
+      ffmpegProcess.stderr.on('data', data => {
+        const msg = data.toString();
+        if (msg.includes('Error')) {
+          console.error('[FFmpeg Error]', msg.trim());
+        }
+      });
+
+      return;
+    }
+
+    // Lógica original de Direct Stream (Direct Play)
     const torrent = await addTorrent(magnet.magnet_url);
     const file = torrent.files[idx];
     
@@ -78,7 +145,6 @@ router.get('/:id/:fileIndex', async (req, res) => {
       });
 
       // Cria um stream de leitura limitado à faixa solicitada
-      // WebTorrent automaticamente prioriza o download das partes solicitadas
       const stream = file.createReadStream({ start, end });
       stream.on('error', (err) => {
         console.log('[Stream Info] Stream parcial (range) interrompido/fechado:', err.message);

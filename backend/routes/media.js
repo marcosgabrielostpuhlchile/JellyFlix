@@ -1,5 +1,7 @@
 import express from 'express';
 import axios from 'axios';
+import { spawn } from 'child_process';
+import ffprobe from 'ffprobe-static';
 import db from '../db.js';
 import { authenticateToken } from './auth.js';
 import { addTorrent } from '../torrent-manager.js';
@@ -407,15 +409,19 @@ router.get('/settings', authenticateToken, (req, res) => {
     const tmdbRow = db.prepare("SELECT value FROM settings WHERE key = 'tmdb_api_key'").get();
     const typeRow = db.prepare("SELECT value FROM settings WHERE key = 'exposure_type'").get();
     const tokenRow = db.prepare("SELECT value FROM settings WHERE key = 'ngrok_token'").get();
+    const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
 
     const tmdbApiKey = tmdbRow ? tmdbRow.value : '';
     const exposureType = typeRow ? typeRow.value : 'localhost';
     const ngrokToken = tokenRow ? tokenRow.value : '';
+    const transcodeAudio = transcodeRow ? transcodeRow.value === '1' : false;
 
     res.json({
       tmdbApiKey,
       exposureType,
       ngrokToken,
+      transcodeAudio,
+      isFfmpegAvailable: true, // Auto-instalado localmente via npm
       tailscaleIp: getTailscaleIp(),
       ngrokUrl: getNgrokUrl()
     });
@@ -426,12 +432,13 @@ router.get('/settings', authenticateToken, (req, res) => {
 
 // SALVA CONFIGURAÇÕES (Protegido)
 router.post('/settings', authenticateToken, async (req, res) => {
-  const { tmdbApiKey, exposureType, ngrokToken } = req.body;
+  const { tmdbApiKey, exposureType, ngrokToken, transcodeAudio } = req.body;
   try {
     // 1. Salva as configurações no banco
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('tmdb_api_key', ?)").run(tmdbApiKey || '');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('exposure_type', ?)").run(exposureType || 'localhost');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ngrok_token', ?)").run(ngrokToken || '');
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('transcode_audio', ?)").run(transcodeAudio ? '1' : '0');
 
     let activeNgrokUrl = null;
     let errMessage = null;
@@ -614,6 +621,68 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erro ao carregar estrutura do torrent.' });
+  }
+// ROTA PARA EXTRAIR TRILHAS DE ÁUDIO DE UM EPISÓDIO/FILME (Protegido)
+router.get('/:id/files/:fileIndex/tracks', authenticateToken, async (req, res) => {
+  const { id, fileIndex } = req.params;
+  
+  try {
+    const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
+    if (!magnet) {
+      return res.status(404).json({ error: 'Magnet não cadastrado.' });
+    }
+
+    // A URL local para fazer streaming do torrent
+    // ffmpeg/ffprobe pode ler de http://localhost:PORT/api/stream/:id/:fileIndex
+    const streamUrl = `http://localhost:${process.env.PORT || 3000}/api/stream/${id}/${fileIndex}`;
+
+    // Executa o ffprobe local do ffprobe-static via spawn
+    const ffprobeProcess = spawn(ffprobe.path, [
+      '-v', 'error',
+      '-select_streams', 'a', // Seleciona apenas trilhas de áudio
+      '-show_entries', 'stream=index,codec_name:stream_tags=language,title',
+      '-of', 'json',
+      streamUrl
+    ]);
+
+    let output = '';
+    let errorOutput = '';
+
+    ffprobeProcess.stdout.on('data', data => {
+      output += data.toString();
+    });
+
+    ffprobeProcess.stderr.on('data', data => {
+      errorOutput += data.toString();
+    });
+
+    ffprobeProcess.on('close', code => {
+      if (code !== 0) {
+        console.error('[ffprobe] Erro no ffprobe:', errorOutput);
+        return res.status(500).json({ error: 'Falha ao analisar canais de áudio: ' + errorOutput });
+      }
+
+      try {
+        const json = JSON.parse(output);
+        const audioStreams = (json.streams || []).map((stream, idx) => {
+          const tags = stream.tags || {};
+          return {
+            index: idx, // Índice sequencial amigável
+            streamIndex: stream.index, // Índice físico do stream no ffmpeg
+            codec: stream.codec_name,
+            language: tags.language || 'desconhecido',
+            title: tags.title || `Áudio ${idx + 1}`
+          };
+        });
+        res.json({ streams: audioStreams });
+      } catch (e) {
+        res.status(500).json({ error: 'Falha ao ler saída do ffprobe: ' + e.message });
+      }
+    });
+
+  } catch (err) {
+    console.error('Erro ao analisar trilhas de áudio:', err.message);
+    res.status(500).json({ error: 'Erro ao analisar áudio: ' + err.message });
   }
 });
 

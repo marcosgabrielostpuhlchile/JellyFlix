@@ -223,6 +223,25 @@
               </div>
             </div>
           </div>
+
+          <!-- Bloco Transcodificação de Áudio (FFmpeg) -->
+          <div class="settings-card" style="margin-top: 20px;">
+            <h3><i class="fa-solid fa-sliders purple-neon"></i> Transcodificação de Áudio</h3>
+            <p class="helper-text">Habilite a transcodificação de áudio em tempo real para permitir a seleção de faixas de áudio em qualquer navegador (estilo Jellyfin).</p>
+            
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-top: 10px; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="settings-transcode-audio" style="width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);">
+              <label for="settings-transcode-audio" style="margin-bottom: 0; font-size: 0.95rem; font-weight: 500; cursor: pointer;">
+                Ativar transcodificação de áudio dinâmica com FFmpeg (Direct Play de Vídeo + Áudio em AAC)
+              </label>
+            </div>
+
+            <!-- Status do FFmpeg -->
+            <div id="ffmpeg-status-panel" style="margin-top: 14px; padding: 10px 12px; border-radius: 6px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); color: #10b981;">
+              <i class="fa-solid fa-circle-check"></i>
+              <span>FFmpeg e FFprobe locais instalados automaticamente e prontos para uso.</span>
+            </div>
+          </div>
           
           <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Salvar Configurações</button>
         </form>
