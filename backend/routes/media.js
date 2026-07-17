@@ -622,6 +622,8 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message || 'Erro ao carregar estrutura do torrent.' });
   }
+});
+
 // ROTA PARA EXTRAIR TRILHAS DE ÁUDIO DE UM EPISÓDIO/FILME (Protegido)
 router.get('/:id/files/:fileIndex/tracks', authenticateToken, async (req, res) => {
   const { id, fileIndex } = req.params;
