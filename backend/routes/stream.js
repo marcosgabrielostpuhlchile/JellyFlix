@@ -35,15 +35,14 @@ router.get('/:id/:fileIndex', async (req, res) => {
       return res.status(404).json({ error: 'Magnet não cadastrado.' });
     }
 
-    // Se a transcodificação estiver ativa e houver uma faixa de áudio selecionada (e não for a chamada interna do FFmpeg)
-    if (!noTranscode && transcodeEnabled && audioTrackIdx !== undefined) {
-      const audioIdx = parseInt(audioTrackIdx, 10);
+    // Se a transcodificação estiver ativa e não for a chamada interna do FFmpeg
+    if (!noTranscode && transcodeEnabled) {
       const startTime = parseFloat(req.query.startTime || 0);
 
       // Define a URL interna para o FFmpeg ler o stream direto (com noTranscode=true)
       const internalStreamUrl = `http://localhost:${process.env.PORT || 3000}/api/stream/${id}/${fileIndex}?noTranscode=true`;
 
-      console.log(`[Transcode] Iniciando FFmpeg para áudio #${audioIdx} a partir de ${startTime}s...`);
+      console.log(`[Transcode] Iniciando FFmpeg. Faixa: ${audioTrackIdx !== undefined ? '#' + audioTrackIdx : 'padrão (0:a:0)'} a partir de ${startTime}s...`);
 
       // Configura os cabeçalhos de resposta para streaming contínuo de MP4 fragmentado
       res.writeHead(200, {
@@ -52,19 +51,30 @@ router.get('/:id/:fileIndex', async (req, res) => {
         'Access-Control-Allow-Origin': '*'
       });
 
-      // Spawna o FFmpeg usando o binário local do ffmpeg-static
-      const ffmpegProcess = spawn(ffmpegPath, [
+      const ffmpegArgs = [
         '-ss', startTime.toString(), // Seek rápido na entrada
         '-i', internalStreamUrl,     // URL local de stream direto do torrent
         '-map', '0:v:0',              // Copia o primeiro stream de vídeo
-        '-map', `0:a:${audioIdx}`,    // Mapeia a trilha de áudio selecionada
+      ];
+
+      if (audioTrackIdx !== undefined) {
+        const audioIdx = parseInt(audioTrackIdx, 10);
+        ffmpegArgs.push('-map', `0:${audioIdx}`); // Mapeia o stream absoluto correto
+      } else {
+        ffmpegArgs.push('-map', '0:a:0'); // Fallback para o primeiro áudio disponível (padrão)
+      }
+
+      ffmpegArgs.push(
         '-c:v', 'copy',               // Copia vídeo sem processar (0% CPU de vídeo)
         '-c:a', 'aac',                // Transcodifica áudio para AAC
         '-b:a', '192k',               // Bitrate do áudio
         '-f', 'mp4',                  // Output em MP4 fragmentado
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
         'pipe:1'                      // Saída via stdout
-      ]);
+      );
+
+      // Spawna o FFmpeg usando o binário local do ffmpeg-static
+      const ffmpegProcess = spawn(ffmpegPath, ffmpegArgs);
 
       ffmpegProcess.stdout.pipe(res);
 
