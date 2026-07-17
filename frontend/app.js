@@ -417,40 +417,63 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       }
     };
 
-    // 7. Busca trilhas e injeta no menu apenas quando o streaming começa (garante que a conexão do torrent está ativa)
+    // 7. Busca trilhas e injeta no menu de forma paralela e resiliente com retentativas
     let tracksLoaded = false;
-    videoElement.addEventListener('playing', () => {
-      if (transcodeAudio && !tracksLoaded) {
-        tracksLoaded = true;
-        console.log('[Tracks] Vídeo tocando com sucesso. Buscando trilhas via ffprobe...');
-        
-        fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        })
-        .then(res => res.ok ? res.json() : null)
-        .then(tData => {
-          const streams = (tData && tData.streams) || [];
-          if (streams.length > 1) {
-            console.log(`[Tracks] ${streams.length} trilhas encontradas. Injetando no menu...`);
-            audioTracks = streams;
-            
-            // Injeta o item de menu imediatamente
-            injectAudioMenu();
+    let retries = 0;
+    const maxRetries = 15;
 
-            // Re-injeta após cliques no botão da engrenagem
-            const plyrContainer = videoElement.closest('.plyr');
-            if (plyrContainer) {
-              const settingsBtn = plyrContainer.querySelector('[data-plyr="settings"]');
-              if (settingsBtn && !settingsBtn.dataset.audioHandlerBound) {
-                settingsBtn.dataset.audioHandlerBound = "true";
-                settingsBtn.addEventListener('click', () => {
-                  setTimeout(injectAudioMenu, 80);
-                });
-              }
+    const loadTracksResilient = () => {
+      if (!transcodeAudio || tracksLoaded || retries >= maxRetries) return;
+
+      console.log(`[Tracks] Buscando trilhas via ffprobe (tentativa ${retries + 1}/${maxRetries})...`);
+      
+      fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('Status HTTP inválido');
+        return res.json();
+      })
+      .then(tData => {
+        const streams = (tData && tData.streams) || [];
+        if (streams.length > 1) {
+          console.log(`[Tracks] ${streams.length} trilhas de áudio encontradas! Injetando no menu...`);
+          tracksLoaded = true;
+          audioTracks = streams;
+          
+          injectAudioMenu();
+
+          // Vincula o clique da engrenagem
+          const plyrContainer = videoElement.closest('.plyr');
+          if (plyrContainer) {
+            const settingsBtn = plyrContainer.querySelector('[data-plyr="settings"]');
+            if (settingsBtn && !settingsBtn.dataset.audioHandlerBound) {
+              settingsBtn.dataset.audioHandlerBound = "true";
+              settingsBtn.addEventListener('click', () => {
+                setTimeout(injectAudioMenu, 80);
+              });
             }
           }
-        })
-        .catch(e => console.error('Erro ao buscar trilhas de áudio:', e));
+        } else {
+          console.log('[Tracks] Apenas 1 trilha de áudio ou nenhuma encontrada. Sem necessidade de menu.');
+          tracksLoaded = true;
+        }
+      })
+      .catch(e => {
+        console.warn(`[Tracks] Falha ao carregar trilhas na tentativa ${retries + 1}:`, e.message);
+        retries++;
+        // Retenta a cada 3.5 segundos
+        setTimeout(loadTracksResilient, 3500);
+      });
+    };
+
+    // Inicia a busca resiliente em paralelo
+    loadTracksResilient();
+
+    // Como salvaguarda extra, tenta carregar também no evento 'playing' do vídeo
+    videoElement.addEventListener('playing', () => {
+      if (transcodeAudio && !tracksLoaded) {
+        loadTracksResilient();
       }
     });
 
