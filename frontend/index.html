@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JeelyFlix - Streaming P2P de Magnet Links</title>
+  <meta name="description" content="Assista a filmes, séries e animes diretamente de links magnet (torrents) via streaming P2P rápido com metadados automáticos.">
+  
+  <!-- Fontes Premium -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Plyr.js CSS (Player Premium) -->
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+  
+  <!-- Estilo Local -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ==================== TELA DE AUTH ==================== -->
+  <div id="auth-screen" class="auth-wrapper active">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <i class="fa-solid fa-play-circle purple-neon"></i>
+        <span>Jeely<span>Flix</span></span>
+      </div>
+      <h1 id="auth-title">Fazer Login</h1>
+      <p id="auth-subtitle">Entre com seus dados para acessar o catálogo</p>
+      
+      <form id="auth-form">
+        <div class="form-group">
+          <label for="auth-username">Nome de Usuário</label>
+          <div class="input-icon">
+            <i class="fa-solid fa-user"></i>
+            <input type="text" id="auth-username" placeholder="Digite seu usuário" required autocomplete="username">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="auth-password">Senha</label>
+          <div class="input-icon">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="auth-password" placeholder="Digite sua senha" required autocomplete="current-password">
+          </div>
+        </div>
+
+        <button type="submit" id="auth-submit-btn" class="btn btn-primary">Entrar</button>
+      </form>
+      
+      <div class="auth-toggle">
+        <span id="auth-toggle-text">Não tem uma conta?</span>
+        <button id="auth-toggle-btn" type="button">Registrar-se</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== WRAPPER DA SPA (MÃE) ==================== -->
+  <div id="app-wrapper" class="app-layout">
+    
+    <!-- SIDEBAR PERSISTENTE (RETRÁTIL POR SETA) -->
+    <aside id="app-sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <i class="fa-solid fa-play-circle purple-neon brand-icon"></i>
+        <span class="brand-text">Jeely<span>Flix</span></span>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <ul>
+          <li class="active">
+            <a href="#" id="nav-catalog" title="Catálogo">
+              <i class="fa-solid fa-circle-play"></i>
+              <span class="nav-label">Catálogo</span>
+            </a>
+          </li>
+          <li>
+            <a href="#" id="nav-add-magnet-side" title="Adicionar Magnet">
+              <i class="fa-solid fa-plus-circle"></i>
+              <span class="nav-label">Adicionar Magnet</span>
+            </a>
+          </li>
+          <li>
+            <a href="#" id="nav-settings" title="Configurações">
+              <i class="fa-solid fa-gear"></i>
+              <span class="nav-label">Configurações</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <button id="nav-logout" class="logout-btn" title="Sair da Conta">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          <span class="nav-label">Sair da Conta</span>
+        </button>
+        
+        <!-- Botão de seta para retração manual -->
+        <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Recolher Sidebar">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ÁREA PRINCIPAL DE CONTEÚDO -->
+    <main class="main-content">
+      
+      <!-- HEADER -->
+      <header class="app-header">
+        <div class="header-left">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="catalog-search" placeholder="Buscar filmes, séries ou animes...">
+          </div>
+        </div>
+        <div class="header-right">
+          <button id="btn-open-add-modal" class="btn btn-primary btn-icon">
+            <i class="fa-solid fa-magnet"></i>
+            <span>Adicionar Magnet</span>
+          </button>
+          <div class="user-profile">
+            <div class="avatar" id="user-avatar-initial">U</div>
+            <span id="user-display-name">Usuário</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- CATÁLOGO -->
+      <section id="catalog-section" class="content-section active">
+        <div class="section-title-bar">
+          <h2>Catálogo de Mídias</h2>
+          <span id="catalog-counter" class="catalog-badge">0 Mídias</span>
+        </div>
+        
+        <!-- Grid de Cards de Mídia -->
+        <div id="media-grid" class="media-grid">
+          <!-- Carregado via JS -->
+        </div>
+      </section>
+
+      <!-- CONFIGURAÇÕES -->
+      <section id="settings-section" class="content-section">
+        <div class="section-title-bar">
+          <h2>Configurações do Sistema</h2>
+        </div>
+        
+        <form id="settings-form">
+          <!-- Bloco Chaves de API -->
+          <div class="settings-card">
+            <h3><i class="fa-solid fa-key purple-neon"></i> Chaves de API</h3>
+            <p class="helper-text">Configure as chaves necessárias para enriquecer o catálogo com informações externas.</p>
+            
+            <div class="form-group">
+              <label for="settings-tmdb-key">Chave de API do TMDB (The Movie Database)</label>
+              <div class="input-icon" style="position: relative;">
+                <i class="fa-solid fa-key" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.95rem;"></i>
+                <input type="text" id="settings-tmdb-key" placeholder="Cole sua API Key do TMDB aqui" style="padding-left: 40px; width: 100%;">
+              </div>
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
+                Você pode obter uma chave de API gratuita registrando uma conta em <a href="https://www.themoviedb.org/" target="_blank" style="color: var(--primary); text-decoration: underline;">themoviedb.org</a>.
+              </p>
+            </div>
+          </div>
+
+          <!-- Bloco Exposição do Servidor -->
+          <div class="settings-card" style="margin-top: 20px;">
+            <h3><i class="fa-solid fa-network-wired purple-neon"></i> Exposição do Servidor</h3>
+            <p class="helper-text">Configure como o servidor do JeelyFlix será exposto para permitir acessos de celulares, smart TVs ou outras redes.</p>
+            
+            <div class="form-group">
+              <label for="settings-exposure-type">Modo de Exposição</label>
+              <select id="settings-exposure-type" style="cursor: pointer; padding-left: 14px;">
+                <option value="localhost">Localhost (Apenas nesta máquina - http://localhost:3000)</option>
+                <option value="tailscale">Tailscale VPN (Expor na sua rede segura Tailscale)</option>
+                <option value="ngrok">Ngrok Tunnel (Expor na Internet via link público HTTPS)</option>
+              </select>
+            </div>
+
+            <!-- Campo dinâmico do token ngrok -->
+            <div class="form-group" id="ngrok-token-group" style="display: none;">
+              <label for="settings-ngrok-token">Token de Autenticação Ngrok (Authtoken)</label>
+              <div class="input-icon" style="position: relative;">
+                <i class="fa-solid fa-shield-halved" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.95rem;"></i>
+                <input type="text" id="settings-ngrok-token" placeholder="Insira seu Ngrok Authtoken" style="padding-left: 40px; width: 100%;">
+              </div>
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
+                Obtenha o seu token de autenticação gratuito em <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" style="color: var(--primary); text-decoration: underline;">dashboard.ngrok.com</a>.
+              </p>
+            </div>
+
+            <!-- Painel Informativo sobre o status do endereço de acesso -->
+            <div id="exposure-info-panel" style="display: none; margin-top: 18px; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color); background: #1a1b2d;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <span id="exposure-status-indicator" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+                <strong id="exposure-status-label" style="font-size: 0.9rem; color: var(--text-color);">Servidor Exposto em:</strong>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; background: #0f101f; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border-color); gap: 10px;">
+                <span id="exposure-public-url" style="font-family: monospace; font-size: 0.9rem; color: var(--primary); word-break: break-all;">http://localhost:3000</span>
+                <button type="button" id="btn-copy-exposure-url" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85rem; height: auto; min-height: unset; white-space: nowrap;" title="Copiar Link">
+                  <i class="fa-solid fa-copy"></i> Copiar
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Salvar Configurações</button>
+        </form>
+      </section>
+
+      <!-- TELA DE DETALHES DA MÍDIA -->
+      <section id="details-section" class="content-section details-section">
+        <button id="btn-back-to-catalog" class="back-btn">
+          <i class="fa-solid fa-arrow-left"></i> Voltar ao Catálogo
+        </button>
+        
+        <!-- Fundo amplo com o banner (Backdrop) -->
+        <div id="details-hero" class="details-hero">
+          <div class="hero-overlay"></div>
+        </div>
+
+        <div class="details-content-wrapper">
+          <div class="details-meta-card">
+            <div class="poster-container">
+              <img id="detail-poster" src="" alt="Poster da Mídia">
+            </div>
+            
+            <div class="info-container">
+              <div class="title-row">
+                <h1 id="detail-title">Nome da Mídia</h1>
+                <span id="detail-badge" class="badge">Filme</span>
+              </div>
+              <p id="detail-original-title" class="original-title">Título Original</p>
+              
+              <div class="stats-row">
+                <span id="detail-rating" class="rating"><i class="fa-solid fa-star"></i> 0.0</span>
+                <span id="detail-release"><i class="fa-solid fa-calendar"></i> 2026</span>
+                <span id="detail-genres" class="genres">Gêneros</span>
+              </div>
+
+              <!-- Container de rolagem fixo para a sinopse (Exigência restrita) -->
+              <div class="synopsis-scroll-container">
+                <p id="detail-synopsis">Carregando sinopse...</p>
+              </div>
+
+              <div class="credits-grid">
+                <div>
+                  <strong>Estúdio / Criador:</strong>
+                  <span id="detail-studio">Desconhecido</span>
+                </div>
+                <div>
+                  <strong>Elenco Principal:</strong>
+                  <span id="detail-cast">Desconhecido</span>
+                </div>
+              </div>
+
+              <div class="actions-row">
+                <button id="btn-open-identify-modal" class="btn btn-secondary">
+                  <i class="fa-solid fa-circle-question"></i> Identificar Manualmente
+                </button>
+                <button id="btn-delete-media" class="btn btn-danger">
+                  <i class="fa-solid fa-trash"></i> Excluir do Catálogo
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SEÇÃO DO PLAYER E SELEÇÃO DE ARQUIVOS -->
+          <div class="player-container-section">
+            <div class="torrent-files-wrapper">
+              <h3><i class="fa-solid fa-folder-open"></i> Arquivos Disponíveis no Torrent</h3>
+              <p class="helper-text">Selecione o arquivo de vídeo abaixo para iniciar a reprodução:</p>
+              <ul id="torrent-files-list" class="files-list">
+                <!-- Carregado via JS -->
+              </ul>
+            </div>
+
+            <!-- Reservado para o player de vídeo (Garantia de Player Único) -->
+            <div class="video-player-wrapper">
+              <div class="video-player-header">
+                <h3><i class="fa-solid fa-tv"></i> Player de Vídeo</h3>
+                <span id="playing-file-title" class="playing-title">Nenhum vídeo selecionado</span>
+              </div>
+              <div id="unique-player-root" class="player-root">
+                <div class="player-placeholder">
+                  <i class="fa-solid fa-circle-play"></i>
+                  <p>Selecione um arquivo acima para iniciar o streaming P2P.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ==================== MODAL: ADICIONAR MAGNET ==================== -->
+  <div id="add-magnet-modal" class="modal-wrapper">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Adicionar Link Magnet</h2>
+        <button id="btn-close-add-modal" class="close-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="add-magnet-form">
+        <div class="form-group">
+          <label for="magnet-url">Link Magnet (Torrent)</label>
+          <textarea id="magnet-url" placeholder="Cole aqui o link magnet:?xt=urn:btih:..." required></textarea>
+        </div>
+        <div class="form-group">
+          <label for="magnet-type">Classificação de Conteúdo</label>
+          <select id="magnet-type" required>
+            <option value="movie">Filme</option>
+            <option value="series">Série</option>
+            <option value="anime">Anime</option>
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-cancel-add-modal" class="btn btn-secondary">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Adicionar Mídia</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: IDENTIFICAR MANUALMENTE ==================== -->
+  <div id="identify-modal" class="modal-wrapper">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Identificação Manual</h2>
+        <button id="btn-close-identify-modal" class="close-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="identify-form">
+        <p class="modal-helper-text">Busque a mídia pelo nome para preencher o ID automaticamente, ou digite o ID externo do TMDB/MyAnimeList caso já o conheça.</p>
+        
+        <div class="form-group">
+          <label for="identify-source">Serviço de Metadados</label>
+          <select id="identify-source" required>
+            <option value="tmdb">The Movie Database (TMDB) - Filmes/Séries</option>
+            <option value="jikan">MyAnimeList (Jikan API) - Animes</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="identify-search-input">Buscar Mídia por Nome</label>
+          <div style="display: flex; gap: 8px;">
+            <div class="input-icon" style="flex: 1; position: relative;">
+              <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
+              <input type="text" id="identify-search-input" placeholder="Digite o nome (ex: Matrix)" style="padding-left: 40px; width: 100%;">
+            </div>
+            <button type="button" id="btn-search-metadata" class="btn btn-secondary" style="white-space: nowrap;">Buscar</button>
+          </div>
+        </div>
+
+        <div class="form-group" id="search-results-group" style="display: none;">
+          <label for="identify-results-select">Resultados Encontrados</label>
+          <select id="identify-results-select" style="cursor: pointer; padding-left: 14px;">
+            <!-- Opções inseridas via JS -->
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="identify-id">ID do Conteúdo (Apenas Números)</label>
+          <input type="number" id="identify-id" placeholder="Exemplo: TMDB de Matrix = 603" required style="padding-left: 14px;">
+        </div>
+
+        <div class="form-group">
+          <label for="identify-type">Tipo de Conteúdo (Selecione TMDB correspondente)</label>
+          <select id="identify-type" required>
+            <option value="movie">Filme (Movie)</option>
+            <option value="series">Série de TV (TV Show)</option>
+            <option value="anime">Anime (Jikan)</option>
+          </select>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-cancel-identify-modal" class="btn btn-secondary">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Reindexar Metadados</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Plyr.js Library -->
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+  <!-- Lógica SPA Local -->
+  <script src="app.js"></script>
+</body>
+</html>
