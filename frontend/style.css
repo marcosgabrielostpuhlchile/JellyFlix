@@ -539,6 +539,43 @@ body {
   gap: 24px;
 }
 
+/* FILEIRAS DE GÊNEROS ESTILO NETFLIX */
+.genre-row {
+  margin-bottom: 36px;
+  position: relative;
+}
+
+.genre-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-color);
+  margin-bottom: 14px;
+  padding-left: 10px;
+  border-left: 3px solid var(--primary);
+  letter-spacing: 0.5px;
+}
+
+.genre-slider {
+  display: flex;
+  overflow-x: auto;
+  gap: 20px;
+  padding: 10px 4px;
+  scroll-behavior: smooth;
+  -ms-overflow-style: none;  /* IE/Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.genre-slider::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+/* Garante largura fixa para os cards dentro do slider para não esmagarem */
+.genre-slider .media-card {
+  flex: 0 0 180px;
+  width: 180px;
+}
+
 /* CARD DE MÍDIA GLASSMORPHISM */
 .media-card {
   background: var(--bg-card);

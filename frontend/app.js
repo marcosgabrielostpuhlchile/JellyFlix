@@ -2,6 +2,7 @@
 let currentMediaId = null;
 let activePlayer = null;
 let allMediaData = []; // Cache do catálogo para busca local rápida
+let currentCategoryFilter = 'all'; // 'all', 'movie', 'series', 'anime'
 
 // Inicialização da página
 document.addEventListener('DOMContentLoaded', () => {
@@ -306,11 +307,17 @@ async function loadCatalog() {
 function renderCatalogGrid(items) {
   const mediaGrid = document.getElementById('media-grid');
   
-  // Agrupa/deduplica itens com o mesmo ID externo (mesma série/filme no TMDB) para não repetir capas na index
+  // 1. Aplica o filtro de categoria lateral (Filmes, Séries, Animes)
+  let filteredItems = items;
+  if (currentCategoryFilter !== 'all') {
+    filteredItems = items.filter(item => item.media_type === currentCategoryFilter);
+  }
+
+  // 2. Agrupa/deduplica itens com o mesmo ID externo (mesma série/filme no TMDB) para não repetir capas na index
   const seenExternalIds = new Set();
   const uniqueItems = [];
 
-  items.forEach(item => {
+  filteredItems.forEach(item => {
     if (item.external_id) {
       const extId = item.external_id.toString();
       if (!seenExternalIds.has(extId)) {
@@ -322,21 +329,23 @@ function renderCatalogGrid(items) {
     }
   });
 
+  // Atualiza o contador de mídias exibidas na barra de título
   document.getElementById('catalog-counter').textContent = `${uniqueItems.length} Mídias`;
   
   if (uniqueItems.length === 0) {
+    mediaGrid.className = 'media-grid'; // Garante estilo grid para a mensagem vazia
     mediaGrid.innerHTML = `
       <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--text-muted);">
         <i class="fa-solid fa-magnet fa-3x" style="color: var(--border-color); margin-bottom: 15px;"></i>
-        <p>Nenhuma mídia cadastrada no JeelyFlix.</p>
+        <p>Nenhuma mídia encontrada nesta categoria.</p>
         <p style="font-size: 0.85rem; margin-top: 5px;">Clique no botão superior para adicionar um Magnet Link.</p>
       </div>
     `;
     return;
   }
 
-  mediaGrid.innerHTML = '';
-  uniqueItems.forEach(media => {
+  // Função auxiliar para renderizar um card de mídia
+  function createCardElement(media) {
     const card = document.createElement('article');
     card.className = 'media-card';
     
@@ -377,8 +386,74 @@ function renderCatalogGrid(items) {
     `;
 
     card.addEventListener('click', () => showDetails(media));
-    mediaGrid.appendChild(card);
-  });
+    return card;
+  }
+
+  // 3. Verifica se há uma busca por texto ativa
+  const searchValue = document.getElementById('catalog-search').value.trim();
+  const searchActive = searchValue.length > 0;
+
+  if (searchActive) {
+    // Modo de busca: renderizar em grade plana (media-grid)
+    mediaGrid.className = 'media-grid';
+    mediaGrid.innerHTML = '';
+    uniqueItems.forEach(media => {
+      const card = createCardElement(media);
+      mediaGrid.appendChild(card);
+    });
+  } else {
+    // Modo normal: agrupar por gêneros no estilo Netflix
+    mediaGrid.className = ''; // Remove grid estilo para empilhar as linhas em bloco
+    mediaGrid.innerHTML = '';
+
+    // Agrupamento de mídias por gêneros
+    const genreMap = {};
+    uniqueItems.forEach(media => {
+      const genres = media.genres ? media.genres.split(',').map(g => g.trim()) : [];
+      if (genres.length === 0 || (genres.length === 1 && !genres[0])) {
+        if (!genreMap['Sem Gênero']) genreMap['Sem Gênero'] = [];
+        genreMap['Sem Gênero'].push(media);
+      } else {
+        genres.forEach(g => {
+          if (g) {
+            if (!genreMap[g]) genreMap[g] = [];
+            genreMap[g].push(media);
+          }
+        });
+      }
+    });
+
+    // Ordenação dos gêneros (com "Sem Gênero" por último)
+    const sortedGenres = Object.keys(genreMap).sort();
+    const noGenreIndex = sortedGenres.indexOf('Sem Gênero');
+    if (noGenreIndex > -1) {
+      sortedGenres.splice(noGenreIndex, 1);
+      sortedGenres.push('Sem Gênero');
+    }
+
+    // Cria as fileiras horizontais de gêneros
+    sortedGenres.forEach(genreName => {
+      const row = document.createElement('div');
+      row.className = 'genre-row';
+
+      const h3 = document.createElement('h3');
+      h3.className = 'genre-title';
+      h3.textContent = genreName;
+      row.appendChild(h3);
+
+      const slider = document.createElement('div');
+      slider.className = 'genre-slider';
+
+      // Renderiza e insere os cards correspondentes neste gênero
+      genreMap[genreName].forEach(media => {
+        const card = createCardElement(media);
+        slider.appendChild(card);
+      });
+
+      row.appendChild(slider);
+      mediaGrid.appendChild(row);
+    });
+  }
 }
 
 // Abre e preenche a tela de Detalhes da Mídia
@@ -665,9 +740,20 @@ function backToCatalog() {
   document.getElementById('settings-section').classList.remove('active');
   document.getElementById('catalog-section').classList.add('active');
   
-  // Atualizar itens ativos na sidebar
+  // Atualizar itens ativos na sidebar com base na categoria ativa
   document.querySelectorAll('.sidebar-nav li').forEach(li => li.classList.remove('active'));
-  document.getElementById('nav-catalog').parentElement.classList.add('active');
+  
+  const filterToNavId = {
+    'all': 'nav-catalog',
+    'movie': 'nav-movies',
+    'series': 'nav-series',
+    'anime': 'nav-animes'
+  };
+  const activeNavId = filterToNavId[currentCategoryFilter] || 'nav-catalog';
+  const activeNavEl = document.getElementById(activeNavId);
+  if (activeNavEl) {
+    activeNavEl.parentElement.classList.add('active');
+  }
 
   loadCatalog(); // Recarrega para obter atualizações em segundo plano
 }
@@ -907,6 +993,8 @@ function setupEventListeners() {
         showToast('Não foi possível copiar o link automaticamente.', 'error');
       });
     }
+  });
+
   // 4. Alternador Manual de Sidebar (Setas)
   const sidebar = document.getElementById('app-sidebar');
   const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -983,11 +1071,48 @@ function setupEventListeners() {
     renderCatalogGrid(filtered);
   });
 
-  // 8. Botão Voltar para o Catálogo
+  // 8. Botão Voltar para o Catálogo e Categorias da Sidebar
   document.getElementById('btn-back-to-catalog').addEventListener('click', backToCatalog);
+
+  // Função auxiliar para transicionar de categoria/seção na sidebar
+  function switchCategory(filter, navEl) {
+    destroyActivePlayer();
+    resetDeleteButton();
+
+    currentCategoryFilter = filter;
+    document.getElementById('catalog-search').value = '';
+
+    // Exibe catálogo, oculta outros
+    document.getElementById('details-section').classList.remove('active');
+    document.getElementById('settings-section').classList.remove('active');
+    document.getElementById('catalog-section').classList.add('active');
+
+    // Atualizar itens ativos na sidebar
+    document.querySelectorAll('.sidebar-nav li').forEach(li => li.classList.remove('active'));
+    navEl.parentElement.classList.add('active');
+
+    // Renderiza o grid com as mídias ativas
+    renderCatalogGrid(allMediaData);
+  }
+
   document.getElementById('nav-catalog').addEventListener('click', (e) => {
     e.preventDefault();
-    backToCatalog();
+    switchCategory('all', document.getElementById('nav-catalog'));
+  });
+
+  document.getElementById('nav-movies').addEventListener('click', (e) => {
+    e.preventDefault();
+    switchCategory('movie', document.getElementById('nav-movies'));
+  });
+
+  document.getElementById('nav-series').addEventListener('click', (e) => {
+    e.preventDefault();
+    switchCategory('series', document.getElementById('nav-series'));
+  });
+
+  document.getElementById('nav-animes').addEventListener('click', (e) => {
+    e.preventDefault();
+    switchCategory('anime', document.getElementById('nav-animes'));
   });
 
   // 9. Deletar mídia ativa (com confirmação inline moderna de dois passos, evitando bloqueios de pop-up do navegador)
