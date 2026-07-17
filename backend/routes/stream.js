@@ -123,7 +123,17 @@ router.get('/:id/:fileIndex/subtitles', async (req, res) => {
     
     stream.on('end', () => {
       const buffer = Buffer.concat(chunks);
-      let text = buffer.toString('utf-8');
+      
+      // Decodifica de forma segura: tenta UTF-8 e se falhar (bytes inválidos) usa Windows-1252 (Latin1)
+      let text = '';
+      try {
+        const decoder = new TextDecoder('utf-8', { fatal: true });
+        text = decoder.decode(buffer);
+      } catch (e) {
+        // Fallback para legendas em português codificadas em ANSI / Windows-1252
+        const latinDecoder = new TextDecoder('windows-1252');
+        text = latinDecoder.decode(buffer);
+      }
 
       // Se for formato SRT, faz a conversão de timestamps para VTT na hora
       if (file.name.toLowerCase().endsWith('.srt')) {

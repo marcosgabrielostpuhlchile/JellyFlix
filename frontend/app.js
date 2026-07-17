@@ -306,7 +306,7 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
     }
   });
 
-  // 7. Lógica de faixas de áudio dinâmicas
+  // 7. Lógica de faixas de áudio dinâmicas e suporte a player externo
   const audioTracksContainer = document.getElementById('player-audio-tracks-container');
   const audioTracksButtons = document.getElementById('audio-tracks-buttons');
   
@@ -316,8 +316,12 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
 
     videoElement.addEventListener('loadedmetadata', () => {
       const tracks = videoElement.audioTracks;
+      
       if (tracks && tracks.length > 1) {
+        // Se o navegador expuser a faixa (ex: Safari ou Edge), exibe o seletor nativo
         audioTracksContainer.style.display = 'flex';
+        audioTracksContainer.style.flexDirection = 'row';
+        audioTracksContainer.style.alignItems = 'center';
         
         for (let i = 0; i < tracks.length; i++) {
           const track = tracks[i];
@@ -331,11 +335,9 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
           btn.textContent = track.label || track.language || `Áudio ${i + 1}`;
           
           btn.addEventListener('click', () => {
-            // Desativa todos e ativa o selecionado
             for (let j = 0; j < tracks.length; j++) {
               tracks[j].enabled = (j === i);
             }
-            // Atualiza o estado visual dos botões
             Array.from(audioTracksButtons.children).forEach((b, idx) => {
               if (idx === i) {
                 b.className = 'btn btn-primary';
@@ -348,6 +350,52 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
 
           audioTracksButtons.appendChild(btn);
         }
+      } else {
+        // Exibe a dica informativa premium para navegadores baseados em Chromium (Chrome/Edge)
+        // que bloqueiam a alternância de áudio em arquivos estáticos
+        audioTracksContainer.style.display = 'flex';
+        audioTracksContainer.style.flexDirection = 'column';
+        audioTracksContainer.style.alignItems = 'flex-start';
+        audioTracksContainer.style.gap = '8px';
+        audioTracksContainer.style.width = '100%';
+        
+        const infoTip = document.createElement('div');
+        infoTip.style.fontSize = '0.85rem';
+        infoTip.style.color = 'var(--text-muted)';
+        infoTip.style.lineHeight = '1.5';
+        infoTip.style.width = '100%';
+        
+        // Link dinâmico de streaming
+        const fullStreamUrl = `${window.location.origin}/api/stream/${streamMagnetId}/${fileIndex}`;
+        const vlcUrl = `vlc://${fullStreamUrl.replace(/^https?:\/\//, '')}`;
+
+        infoTip.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <i class="fa-solid fa-circle-info" style="color: var(--primary); font-size: 0.95rem;"></i>
+              <strong>Dica de Áudio e Legendas:</strong> O Chrome impede trocar faixa de áudio em arquivos direct-stream.
+            </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px;">
+              <a href="${vlcUrl}" class="btn btn-primary" style="padding: 5px 12px; font-size: 0.78rem; height: auto; min-height: unset; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                <i class="fa-solid fa-up-right-from-square"></i> Abrir no Player VLC
+              </a>
+              <button type="button" id="btn-copy-stream-link" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.78rem; height: auto; min-height: unset; display: inline-flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-copy"></i> Copiar Link do Stream
+              </button>
+            </div>
+          </div>
+        `;
+
+        audioTracksButtons.appendChild(infoTip);
+
+        // Adiciona listener para o botão de copiar link
+        document.getElementById('btn-copy-stream-link').addEventListener('click', () => {
+          navigator.clipboard.writeText(fullStreamUrl).then(() => {
+            showToast('Link de streaming copiado! Cole no VLC (Ctrl+N) ou PotPlayer.', 'success');
+          }).catch(() => {
+            showToast('Não foi possível copiar o link automaticamente.', 'error');
+          });
+        });
       }
     });
   }
