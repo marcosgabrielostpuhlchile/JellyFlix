@@ -413,45 +413,61 @@ async function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudi
     });
   }
 
-  // Injeta o seletor de áudio dentro do menu nativo do Plyr no evento ready
+  // Injeta o seletor de áudio no menu de configurações do Plyr
   activePlayer.on('ready', () => {
     activePlayer.play().catch(() => {
       console.log('Autoplay bloqueado pelo navegador, aguardando clique.');
     });
 
     if (transcodeAudio && audioTracks.length > 1) {
-      const menu = videoElement.closest('.plyr').querySelector('.plyr__menu__container [role="menu"]');
-      if (menu) {
-        // Evita botões duplicados
-        if (!menu.querySelector('#plyr-custom-audio-item')) {
-          const audioItem = document.createElement('button');
-          audioItem.type = 'button';
-          audioItem.className = 'plyr__control';
-          audioItem.id = 'plyr-custom-audio-item';
-          audioItem.setAttribute('role', 'menuitem');
-          
-          // Encontra a trilha atualmente selecionada
-          const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
-          const activeTrack = audioTracks.find(t => t.index === activeTrackIndex) || audioTracks[0];
-          const friendlyLang = getFriendlyLanguage(activeTrack.language);
+      const plyrContainer = videoElement.closest('.plyr');
+      if (plyrContainer) {
+        const injectAudioMenu = () => {
+          const menu = plyrContainer.querySelector('.plyr__menu__container [role="menu"]');
+          if (menu) {
+            // Se já existe, remove para evitar duplicados
+            const existing = menu.querySelector('#plyr-custom-audio-item');
+            if (existing) existing.remove();
 
-          audioItem.innerHTML = `
-            <span>Áudio</span>
-            <span class="plyr__menu__value" style="color: var(--primary); font-weight: 600;">${friendlyLang} (${activeTrack.title})</span>
-          `;
+            const audioItem = document.createElement('button');
+            audioItem.type = 'button';
+            audioItem.className = 'plyr__control';
+            audioItem.id = 'plyr-custom-audio-item';
+            audioItem.setAttribute('role', 'menuitem');
 
-          // Evento de clique para ciclar entre as faixas de áudio disponíveis
-          audioItem.addEventListener('click', () => {
-            const currentIndex = audioTracks.indexOf(activeTrack);
-            const nextIndex = (currentIndex + 1) % audioTracks.length;
-            const nextTrack = audioTracks[nextIndex];
-            
-            const currentTime = activePlayer.currentTime;
-            console.log(`[Transcode Menu] Alterando faixa de áudio no player para #${nextTrack.index} (${nextTrack.language}) a partir de ${currentTime}s...`);
-            initPlayer(media, streamMagnetId, fileIndex, fileName, nextTrack.index, currentTime);
+            const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
+            const activeTrack = audioTracks.find(t => t.index === activeTrackIndex) || audioTracks[0];
+            const friendlyLang = getFriendlyLanguage(activeTrack.language);
+
+            audioItem.innerHTML = `
+              <span>Áudio</span>
+              <span class="plyr__menu__value" style="color: var(--primary); font-weight: 600;">${friendlyLang} (${activeTrack.title})</span>
+            `;
+
+            audioItem.addEventListener('click', () => {
+              const currentIndex = audioTracks.indexOf(activeTrack);
+              const nextIndex = (currentIndex + 1) % audioTracks.length;
+              const nextTrack = audioTracks[nextIndex];
+              
+              const currentTime = activePlayer.currentTime;
+              console.log(`[Transcode Menu] Alterando faixa de áudio no player para #${nextTrack.index} (${nextTrack.language}) a partir de ${currentTime}s...`);
+              initPlayer(media, streamMagnetId, fileIndex, fileName, nextTrack.index, currentTime);
+            });
+
+            menu.appendChild(audioItem);
+          }
+        };
+
+        // Primeira injeção na inicialização
+        injectAudioMenu();
+
+        // Re-injeta após cliques no botão da engrenagem, pois o Plyr reconstrói o menu dinamicamente e apaga customizações
+        const settingsBtn = plyrContainer.querySelector('[data-plyr="settings"]');
+        if (settingsBtn && !settingsBtn.dataset.audioHandlerBound) {
+          settingsBtn.dataset.audioHandlerBound = "true";
+          settingsBtn.addEventListener('click', () => {
+            setTimeout(injectAudioMenu, 80); // Pequeno atraso para aguardar a renderização do Plyr
           });
-
-          menu.appendChild(audioItem);
         }
       }
     }
