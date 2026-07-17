@@ -1158,3 +1158,49 @@ body {
 .player-container-section.no-files .torrent-files-wrapper {
   display: none !important;
 }
+
+/* ESTILIZAÇÃO DO SELETOR DE ÁUDIO */
+.audio-tracks-bar {
+  border-radius: 8px !important;
+  border: 1px solid var(--border-color) !important;
+  background: #141627 !important;
+}
+
+/* CUSTOMIZAÇÃO PREMIUM PLYR.JS (JEELYFLIX ESTILO NEON) */
+.plyr {
+  --plyr-color-main: var(--primary) !important; /* Roxo neon */
+  --plyr-video-background: #08090f !important;
+  --plyr-menu-background: #121324 !important;
+  --plyr-menu-color: var(--text-color) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.plyr:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.25) !important;
+}
+
+.plyr__controls {
+  background: linear-gradient(rgba(0, 0, 0, 0), rgba(8, 9, 15, 0.95)) !important;
+  padding: 15px 12px !important;
+}
+
+.plyr__control--overlaid {
+  background: var(--primary) !important;
+  box-shadow: 0 0 22px rgba(139, 92, 246, 0.65) !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.plyr__control--overlaid:hover {
+  background: var(--primary-hover) !important;
+  transform: scale(1.08) !important;
+}
+
+.plyr__control:hover {
+  background: var(--primary) !important;
+  color: #fff !important;
+}

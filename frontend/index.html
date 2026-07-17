@@ -301,6 +301,13 @@
                 <h3><i class="fa-solid fa-tv"></i> Player de Vídeo</h3>
                 <span id="playing-file-title" class="playing-title">Nenhum vídeo selecionado</span>
               </div>
+              
+              <!-- Seletor dinâmico de faixa de áudio -->
+              <div id="player-audio-tracks-container" class="audio-tracks-bar" style="display: none; padding: 10px 16px; background: #161726; border-bottom: 1px solid var(--border-color); align-items: center; gap: 12px;">
+                <span style="font-size: 0.85rem; color: var(--text-muted);"><i class="fa-solid fa-volume-high"></i> Faixa de Áudio:</span>
+                <div id="audio-tracks-buttons" style="display: flex; gap: 8px;"></div>
+              </div>
+
               <div id="unique-player-root" class="player-root">
                 <div class="player-placeholder">
                   <i class="fa-solid fa-circle-play"></i>

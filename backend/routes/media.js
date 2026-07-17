@@ -525,6 +525,7 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
 
     let torrent;
     let files = [];
+    let subtitles = [];
     let loadFromCache = false;
 
     try {
@@ -533,9 +534,22 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
     } catch (err) {
       // Se falhou ao conectar (timeout), tenta buscar do cache no banco de dados
       if (magnet.files) {
-        files = JSON.parse(magnet.files).filter(f => f.length >= 50 * 1024 * 1024);
-        loadFromCache = true;
-        console.log(`[Files Cache] Mídia ID ${id} carregada a partir do cache local devido a timeout de seeders.`);
+        try {
+          const cached = JSON.parse(magnet.files);
+          if (Array.isArray(cached)) {
+            // Retrocompatibilidade: cache legado era só array de vídeos
+            files = cached.filter(f => f.length >= 50 * 1024 * 1024);
+            subtitles = [];
+          } else {
+            // Novo formato estruturado
+            files = cached.videoFiles || [];
+            subtitles = cached.subtitleFiles || [];
+          }
+          loadFromCache = true;
+          console.log(`[Files Cache] Mídia ID ${id} carregada a partir do cache local devido a timeout de seeders.`);
+        } catch (e) {
+          return res.status(500).json({ error: 'Erro ao ler cache de arquivos: ' + e.message });
+        }
       } else {
         // Se não tem cache, propaga o erro de timeout
         return res.status(500).json({ error: 'Tempo limite esgotado para obter metadados do Torrent (Sem peers/seeders ativos).' });
@@ -556,21 +570,26 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
         }
       }
       
-      // Mapeia e retorna apenas os arquivos que são formatos de vídeo
+      // Mapeia todos os arquivos do torrent
       const videoExtensions = ['.mp4', '.mkv', '.avi', '.webm', '.flv', '.mov'];
-      files = torrent.files
-        .map((file, index) => ({
-          index,
-          name: file.name,
-          length: file.length,
-          path: file.path,
-          isSupported: videoExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
-        }))
-        .filter(f => f.isSupported && f.length >= 50 * 1024 * 1024); // Filtra apenas vídeos >= 50MB (descarte de samples/clipes)
+      const subtitleExtensions = ['.srt', '.vtt'];
+
+      const allFiles = torrent.files.map((file, index) => ({
+        index,
+        name: file.name,
+        length: file.length,
+        path: file.path,
+        isVideo: videoExtensions.some(ext => file.name.toLowerCase().endsWith(ext)),
+        isSubtitle: subtitleExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
+      }));
+
+      // Filtra apenas vídeos >= 50MB e as legendas
+      files = allFiles.filter(f => f.isVideo && f.length >= 50 * 1024 * 1024);
+      subtitles = allFiles.filter(f => f.isSubtitle);
 
       // Salva a estrutura de arquivos no cache do banco de dados
       try {
-        db.prepare('UPDATE magnets SET files = ? WHERE id = ?').run(JSON.stringify(files), id);
+        db.prepare('UPDATE magnets SET files = ? WHERE id = ?').run(JSON.stringify({ videoFiles: files, subtitleFiles: subtitles }), id);
       } catch (e) {
         console.error('Erro ao salvar cache de arquivos no BD:', e.message);
       }
@@ -590,6 +609,7 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
       title: loadFromCache ? magnet.title : torrent.name,
       infoHash: loadFromCache ? magnet.info_hash : torrent.infoHash,
       files,
+      subtitles,
       updatedMedia
     });
   } catch (err) {

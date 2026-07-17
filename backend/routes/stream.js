@@ -98,4 +98,66 @@ router.get('/:id/:fileIndex', async (req, res) => {
   }
 });
 
+// ROTA PARA LEITURA E CONVERSÃO DE LEGENDAS (SRT para WebVTT)
+router.get('/:id/:fileIndex/subtitles', async (req, res) => {
+  const { id, fileIndex } = req.params;
+  const idx = parseInt(fileIndex, 10);
+
+  try {
+    const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
+    if (!magnet) {
+      return res.status(404).json({ error: 'Magnet não cadastrado.' });
+    }
+
+    const torrent = await addTorrent(magnet.magnet_url);
+    const file = torrent.files[idx];
+    if (!file) {
+      return res.status(404).json({ error: 'Arquivo de legenda não encontrado.' });
+    }
+
+    // Lê o conteúdo do arquivo de legenda do torrent
+    const stream = file.createReadStream();
+    const chunks = [];
+    
+    stream.on('data', chunk => chunks.push(chunk));
+    
+    stream.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      let text = buffer.toString('utf-8');
+
+      // Se for formato SRT, faz a conversão de timestamps para VTT na hora
+      if (file.name.toLowerCase().endsWith('.srt')) {
+        text = srtToVtt(text);
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'text/vtt; charset=utf-8',
+        'Access-Control-Allow-Origin': '*' // Evita bloqueio de CORS no navegador
+      });
+      res.end(text);
+    });
+
+    stream.on('error', err => {
+      console.error('[Subtitle Stream] Erro no stream da legenda:', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Erro ao ler arquivo de legenda: ' + err.message });
+      }
+    });
+
+  } catch (err) {
+    console.error('Erro ao carregar legenda do torrent:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Erro ao carregar legenda: ' + err.message });
+    }
+  }
+});
+
+function srtToVtt(srtText) {
+  let vtt = 'WEBVTT\n\n';
+  // Substitui as vírgulas por pontos nos timestamps (ex: 00:01:20,300 -> 00:01:20.300)
+  const converted = srtText.replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g, '$1.$2');
+  vtt += converted;
+  return vtt;
+}
+
 export default router;

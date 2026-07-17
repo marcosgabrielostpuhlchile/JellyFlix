@@ -3,6 +3,7 @@ let currentMediaId = null;
 let activePlayer = null;
 let allMediaData = []; // Cache do catálogo para busca local rápida
 let currentCategoryFilter = 'all'; // 'all', 'movie', 'series', 'anime'
+let currentSubtitles = []; // Lista de legendas do torrent ativo
 
 // Inicialização da página
 document.addEventListener('DOMContentLoaded', () => {
@@ -94,6 +95,12 @@ function destroyActivePlayer() {
     `;
   }
   document.getElementById('playing-file-title').textContent = 'Nenhum vídeo selecionado';
+
+  // Oculta o container de faixas de áudio
+  const audioTracksContainer = document.getElementById('player-audio-tracks-container');
+  if (audioTracksContainer) {
+    audioTracksContainer.style.display = 'none';
+  }
 }
 
 // Formata o nome do arquivo para mostrar o número correspondente do episódio de forma amigável
@@ -220,6 +227,7 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
   videoElement.className = 'plyr';
   videoElement.controls = true;
   videoElement.playsInline = true;
+  videoElement.crossOrigin = 'anonymous'; // IMPORTANTE para evitar bloqueio de CORS ao carregar as legendas
 
   const sourceElement = document.createElement('source');
   sourceElement.src = streamUrl;
@@ -235,9 +243,47 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
   }
 
   videoElement.appendChild(sourceElement);
+
+  // 5. Injeta as legendas encontradas no torrent dinamicamente
+  if (currentSubtitles && currentSubtitles.length > 0) {
+    currentSubtitles.forEach((sub) => {
+      const track = document.createElement('track');
+      track.kind = 'captions';
+      
+      // Converte nome de arquivo em rótulo amigável no menu
+      let label = sub.name;
+      const lowerName = sub.name.toLowerCase();
+      if (lowerName.includes('portuguese') || lowerName.includes('por') || lowerName.includes('pt-br') || lowerName.includes('ptbr')) {
+        label = `Português (${sub.name})`;
+        track.srclang = 'pt';
+      } else if (lowerName.includes('english') || lowerName.includes('eng')) {
+        label = `English (${sub.name})`;
+        track.srclang = 'en';
+      } else if (lowerName.includes('spanish') || lowerName.includes('esp')) {
+        label = `Español (${sub.name})`;
+        track.srclang = 'es';
+      } else {
+        track.srclang = 'xx';
+      }
+      
+      track.label = label;
+      track.src = `/api/stream/${streamMagnetId}/${sub.index}/subtitles`;
+
+      // Auto-seleção inteligente: marca como padrão se for em português ou bater com o nome do arquivo de vídeo
+      const isPt = label.includes('Português');
+      const videoNameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+      const isMatchingVideo = lowerName.includes(videoNameWithoutExt.toLowerCase());
+      if (isPt || isMatchingVideo) {
+        track.default = true;
+      }
+
+      videoElement.appendChild(track);
+    });
+  }
+
   root.appendChild(videoElement);
 
-  // 5. Instancia a biblioteca Plyr
+  // 6. Instancia a biblioteca Plyr
   activePlayer = new Plyr(videoElement, {
     controls: [
       'play-large', 'play', 'progress', 'current-time', 'duration',
@@ -253,9 +299,58 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName) {
       speed: 'Velocidade',
       normal: 'Normal',
       quality: 'Qualidade',
-      loop: 'Loop'
+      loop: 'Loop',
+      captions: 'Legendas',
+      disabled: 'Desativado',
+      enabled: 'Ativado'
     }
   });
+
+  // 7. Lógica de faixas de áudio dinâmicas
+  const audioTracksContainer = document.getElementById('player-audio-tracks-container');
+  const audioTracksButtons = document.getElementById('audio-tracks-buttons');
+  
+  if (audioTracksContainer && audioTracksButtons) {
+    audioTracksContainer.style.display = 'none';
+    audioTracksButtons.innerHTML = '';
+
+    videoElement.addEventListener('loadedmetadata', () => {
+      const tracks = videoElement.audioTracks;
+      if (tracks && tracks.length > 1) {
+        audioTracksContainer.style.display = 'flex';
+        
+        for (let i = 0; i < tracks.length; i++) {
+          const track = tracks[i];
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = track.enabled ? 'btn btn-primary' : 'btn btn-secondary';
+          btn.style.padding = '4px 12px';
+          btn.style.fontSize = '0.8rem';
+          btn.style.height = 'auto';
+          btn.style.minHeight = 'unset';
+          btn.textContent = track.label || track.language || `Áudio ${i + 1}`;
+          
+          btn.addEventListener('click', () => {
+            // Desativa todos e ativa o selecionado
+            for (let j = 0; j < tracks.length; j++) {
+              tracks[j].enabled = (j === i);
+            }
+            // Atualiza o estado visual dos botões
+            Array.from(audioTracksButtons.children).forEach((b, idx) => {
+              if (idx === i) {
+                b.className = 'btn btn-primary';
+              } else {
+                b.className = 'btn btn-secondary';
+              }
+            });
+            showToast(`Faixa de áudio alterada para: ${btn.textContent}`, 'success');
+          });
+
+          audioTracksButtons.appendChild(btn);
+        }
+      }
+    });
+  }
 
   // Tenta iniciar a reprodução automática amigavelmente
   activePlayer.on('ready', () => {
@@ -535,7 +630,7 @@ async function showDetails(media) {
         });
         if (res.ok) {
           const json = await res.json();
-          return { magnetId: m.id, files: json.files, updatedMedia: json.updatedMedia };
+          return { magnetId: m.id, files: json.files, subtitles: json.subtitles, updatedMedia: json.updatedMedia };
         }
       } catch (e) {
         console.error(`Erro ao carregar arquivos do torrent ID ${m.id}:`, e);
@@ -545,48 +640,66 @@ async function showDetails(media) {
 
     const results = await Promise.all(fetchPromises);
     
-    // 3. Compilar todos os arquivos encontrados e extrair os metadados mais recentes
+    // 3. Compilar todos os arquivos e legendas encontrados e extrair os metadados mais recentes
     const allFiles = [];
+    const allSubtitles = [];
     let latestUpdatedMedia = null;
 
     results.forEach(res => {
-      if (res && res.files) {
+      if (res) {
         if (res.updatedMedia) {
           latestUpdatedMedia = res.updatedMedia;
         }
 
-        // Determinar a temporada correspondente a este torrent
-        const magnet = relatedMagnets.find(m => m.id === res.magnetId);
-        const torrentTitle = magnet ? (magnet.torrent_title || magnet.title || '') : '';
-
-        res.files.forEach(file => {
-          // Ignora arquivos muito leves (< 50MB) que não são episódios ou filmes (ex: samples/clipes)
-          if (file.length && file.length < 50 * 1024 * 1024) return;
-
-          const parsed = parseSeasonEpisode(file.name);
-          
-          let seasonNum = parsed.season;
-          let episodeNum = parsed.episode;
-          
-          // Se o arquivo não indicou nenhuma temporada (ou seja, manteve o default 1),
-          // mas o título do torrent indica outra temporada (ex: "2ª Temporada"), usamos a do título!
-          const filenameHasSeason = /s\d{1,2}|season\s*\d{1,2}|temporada\s*\d{1,2}/i.test(file.name);
-          if (!filenameHasSeason) {
-            const torrentSeason = parseSeasonFromTitle(torrentTitle);
-            seasonNum = torrentSeason;
-          }
-
-          allFiles.push({
-            magnetId: res.magnetId,
-            fileIndex: file.index,
-            name: file.name,
-            length: file.length,
-            season: seasonNum,
-            episode: episodeNum
+        // Compila as legendas disponíveis no torrent
+        if (res.subtitles) {
+          res.subtitles.forEach(sub => {
+            allSubtitles.push({
+              magnetId: res.magnetId,
+              index: sub.index,
+              name: sub.name,
+              path: sub.path
+            });
           });
-        });
+        }
+
+        if (res.files) {
+          // Determinar a temporada correspondente a este torrent
+          const magnet = relatedMagnets.find(m => m.id === res.magnetId);
+          const torrentTitle = magnet ? (magnet.torrent_title || magnet.title || '') : '';
+
+          res.files.forEach(file => {
+            // Ignora arquivos muito leves (< 50MB) que não são episódios ou filmes
+            if (file.length && file.length < 50 * 1024 * 1024) return;
+
+            const parsed = parseSeasonEpisode(file.name);
+            
+            let seasonNum = parsed.season;
+            let episodeNum = parsed.episode;
+            
+            // Se o arquivo não indicou nenhuma temporada (ou seja, manteve o default 1),
+            // mas o título do torrent indica outra temporada (ex: "2ª Temporada"), usamos a do título!
+            const filenameHasSeason = /s\d{1,2}|season\s*\d{1,2}|temporada\s*\d{1,2}/i.test(file.name);
+            if (!filenameHasSeason) {
+              const torrentSeason = parseSeasonFromTitle(torrentTitle);
+              seasonNum = torrentSeason;
+            }
+
+            allFiles.push({
+              magnetId: res.magnetId,
+              fileIndex: file.index,
+              name: file.name,
+              length: file.length,
+              season: seasonNum,
+              episode: episodeNum
+            });
+          });
+        }
       }
     });
+
+    // Salva as legendas no escopo global para o player instanciar depois
+    currentSubtitles = allSubtitles;
 
     // Recalcula o tipo de mídia após receber metadados atualizados do backend
     const updatedMediaType = (latestUpdatedMedia && latestUpdatedMedia.media_type) || media.media_type;
