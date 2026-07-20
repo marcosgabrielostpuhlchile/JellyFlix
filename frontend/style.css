@@ -1204,3 +1204,27 @@ body {
   background: var(--primary) !important;
   color: #fff !important;
 }
+
+/* ARTPLAYER CUSTOM STYLES */
+.artplayer-app {
+  border-radius: 14px !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4) !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.artplayer-app:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.25) !important;
+}
+
+.art-setting-panel {
+  border-radius: 10px !important;
+  backdrop-filter: blur(10px) !important;
+  background: rgba(15, 17, 26, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.art-setting-item:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+}

@@ -76,10 +76,11 @@ function destroyActivePlayer() {
   // Garante a interrupção completa e eliminação do player anterior para evitar execução dupla
   if (activePlayer) {
     try {
-      activePlayer.pause();
-      activePlayer.destroy();
+      if (typeof activePlayer.destroy === 'function') {
+        activePlayer.destroy(true);
+      }
     } catch (e) {
-      console.error('Erro ao destruir Plyr:', e);
+      console.error('Erro ao destruir ArtPlayer:', e);
     }
     activePlayer = null;
   }
@@ -222,9 +223,8 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
   .then(res => res.ok ? res.json() : { transcodeAudio: false })
   .then(sData => {
     const transcodeAudio = sData.transcodeAudio || false;
-    let audioTracks = [];
 
-    // Oculta a barra de áudio externa por padrão se a transcodificação estiver ativa
+    // Configura aviso do VLC apenas se a transcodificação de áudio estiver desativada no backend
     const audioTracksContainer = document.getElementById('player-audio-tracks-container');
     const audioTracksButtons = document.getElementById('audio-tracks-buttons');
     if (audioTracksContainer && audioTracksButtons) {
@@ -232,7 +232,6 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       audioTracksButtons.innerHTML = '';
 
       if (!transcodeAudio) {
-        // Se a transcodificação estiver desativada, exibe o aviso do Chrome e as opções do VLC
         audioTracksContainer.style.display = 'flex';
         audioTracksContainer.style.flexDirection = 'column';
         audioTracksContainer.style.alignItems = 'flex-start';
@@ -285,226 +284,200 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       }
     }
 
-    // 4. Cria o novo elemento <video> no DOM
-    const root = document.getElementById('unique-player-root');
-    root.innerHTML = ''; // Remove o placeholder
+    // Prepara as opções de legendas para o ArtPlayer
+    let subtitleOption = { url: '', type: 'vtt' };
+    let defaultSubName = 'Desativado';
+    const subtitleSelectorItems = [{ html: 'Desativado', default: true, url: '' }];
 
-    const videoElement = document.createElement('video');
-    videoElement.id = 'jeelyflix-video-player';
-    videoElement.className = 'plyr';
-    videoElement.controls = true;
-    videoElement.playsInline = true;
-    videoElement.crossOrigin = 'anonymous'; // Evita bloqueio de CORS ao carregar as legendas
-
-    const sourceElement = document.createElement('source');
-    sourceElement.src = streamUrl;
-    
-    // Associa o mime-type
-    const ext = fileName.split('.').pop().toLowerCase();
-    if (ext === 'webm') {
-      sourceElement.type = 'video/webm';
-    } else if (ext === 'mkv') {
-      sourceElement.type = 'video/x-matroska';
-    } else {
-      sourceElement.type = 'video/mp4';
-    }
-
-    videoElement.appendChild(sourceElement);
-
-    // 5. Injeta as legendas encontradas no torrent dinamicamente
     if (currentSubtitles && currentSubtitles.length > 0) {
-      currentSubtitles.forEach((sub) => {
-        const track = document.createElement('track');
-        track.kind = 'captions';
-        
+      const defaultSub = currentSubtitles.find(s => {
+        const l = s.name.toLowerCase();
+        return l.includes('portuguese') || l.includes('por') || l.includes('pt-br') || l.includes('ptbr');
+      }) || currentSubtitles[0];
+
+      defaultSubName = defaultSub.name;
+      subtitleOption = {
+        url: `/api/stream/${streamMagnetId}/${defaultSub.index}/subtitles`,
+        type: 'vtt',
+        style: {
+          color: '#ffffff',
+          fontSize: '22px',
+          fontWeight: 'bold',
+          textShadow: '0 2px 4px rgba(0,0,0,0.9)'
+        },
+        encoding: 'utf-8'
+      };
+
+      currentSubtitles.forEach(sub => {
+        const isDefault = sub.index === defaultSub.index;
         let label = sub.name;
         const lowerName = sub.name.toLowerCase();
         if (lowerName.includes('portuguese') || lowerName.includes('por') || lowerName.includes('pt-br') || lowerName.includes('ptbr')) {
           label = `Português (${sub.name})`;
-          track.srclang = 'pt';
         } else if (lowerName.includes('english') || lowerName.includes('eng')) {
           label = `English (${sub.name})`;
-          track.srclang = 'en';
         } else if (lowerName.includes('spanish') || lowerName.includes('esp')) {
           label = `Español (${sub.name})`;
-          track.srclang = 'es';
-        } else {
-          track.srclang = 'xx';
-        }
-        
-        track.label = label;
-        track.src = `/api/stream/${streamMagnetId}/${sub.index}/subtitles`;
-
-        const isPt = label.includes('Português');
-        const videoNameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
-        const isMatchingVideo = lowerName.includes(videoNameWithoutExt.toLowerCase());
-        if (isPt || isMatchingVideo) {
-          track.default = true;
         }
 
-        videoElement.appendChild(track);
+        subtitleSelectorItems.push({
+          html: label,
+          default: isDefault,
+          url: `/api/stream/${streamMagnetId}/${sub.index}/subtitles`
+        });
       });
     }
 
-    root.appendChild(videoElement);
+    // 4. Cria o container do ArtPlayer no DOM
+    const root = document.getElementById('unique-player-root');
+    root.innerHTML = ''; // Limpa o placeholder
 
-    // 6. Instancia a biblioteca Plyr
-    activePlayer = new Plyr(videoElement, {
-      controls: [
-        'play-large', 'play', 'progress', 'current-time', 'duration',
-        'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'
-      ],
-      tooltips: { controls: true, seek: true },
+    const container = document.createElement('div');
+    container.id = 'artplayer-container';
+    container.style.width = '100%';
+    container.style.height = '100%';
+    container.style.minHeight = '480px';
+    container.style.borderRadius = '12px';
+    container.style.overflow = 'hidden';
+    root.appendChild(container);
+
+    const ext = fileName.split('.').pop().toLowerCase();
+
+    // 5. Instancia o ArtPlayer.js
+    activePlayer = new Artplayer({
+      container: container,
+      url: streamUrl,
+      title: media.title || fileName,
+      type: ext === 'webm' ? 'webm' : (ext === 'mkv' ? 'mkv' : 'mp4'),
+      volume: 0.7,
+      isLive: false,
+      muted: false,
+      autoplay: true,
+      pip: true,
+      screenshot: true,
+      setting: true,
+      loop: false,
+      flip: true,
+      playbackRate: true,
+      aspectRatio: true,
+      fullscreen: true,
+      fullscreenWeb: true,
+      subtitleOffset: true,
+      miniProgressBar: true,
+      mutex: true,
+      backdrop: true,
+      playsInline: true,
+      autoPlayback: true,
+      airplay: true,
+      theme: '#8a2be2',
+      lang: 'pt-br',
       i18n: {
-        play: 'Reproduzir',
-        pause: 'Pausar',
-        mute: 'Mudar para mudo',
-        unmute: 'Ativar som',
-        settings: 'Configurações',
-        speed: 'Velocidade',
-        normal: 'Normal',
-        quality: 'Qualidade',
-        loop: 'Loop',
-        captions: 'Legendas',
-        disabled: 'Desativado',
-        enabled: 'Ativado'
-      }
+        'pt-br': {
+          'Play': 'Reproduzir',
+          'Pause': 'Pausar',
+          'Video Info': 'Informações do Vídeo',
+          'Volume': 'Volume',
+          'Screenshot': 'Capturar Tela',
+          'Fullscreen': 'Tela Cheia',
+          'Exit Fullscreen': 'Sair da Tela Cheia',
+          'Web Fullscreen': 'Modo Teatro',
+          'Exit Web Fullscreen': 'Sair do Modo Teatro',
+          'Mini Player': 'Picture-in-Picture',
+          'Setting': 'Configurações',
+          'Subtitle': 'Legendas',
+          'Subtitle Offset': 'Sincronia de Legendas',
+          'Playback Rate': 'Velocidade',
+          'Aspect Ratio': 'Proporção da Tela',
+          'Flip': 'Girar Vídeo',
+          'Normal': 'Normal'
+        }
+      },
+      subtitle: subtitleOption
     });
 
-    // Função de injeção robusta do menu de áudio
-    const injectAudioMenu = () => {
-      const plyrContainer = videoElement.closest('.plyr');
-      if (!plyrContainer) return;
+    // 6. Adiciona Seletor de Legendas no Menu de Configurações do ArtPlayer
+    if (currentSubtitles && currentSubtitles.length > 0) {
+      activePlayer.setting.add({
+        html: 'Legendas (SRT/VTT)',
+        tooltip: defaultSubName,
+        selector: subtitleSelectorItems,
+        onSelect(item) {
+          if (item.url) {
+            activePlayer.subtitle.url = item.url;
+            activePlayer.subtitle.show = true;
+          } else {
+            activePlayer.subtitle.show = false;
+          }
+          return item.html;
+        }
+      });
+    }
 
-      const menuContainer = plyrContainer.querySelector('.plyr__menu__container');
-      if (!menuContainer) return;
-
-      // Encontra o painel principal do Plyr de forma robusta
-      const homePanel = menuContainer.querySelector('[id$="-home"]') || menuContainer.querySelector('.plyr__panel--home') || menuContainer.querySelector('.plyr__panel') || menuContainer;
-      const menu = homePanel.querySelector('[role="menu"]') || homePanel.querySelector('.plyr__panel__content') || homePanel;
-
-      if (menu) {
-        // Remove botão anterior se houver
-        const existing = menu.querySelector('#plyr-custom-audio-item');
-        if (existing) existing.remove();
-
-        const audioItem = document.createElement('button');
-        audioItem.type = 'button';
-        audioItem.className = 'plyr__control';
-        audioItem.id = 'plyr-custom-audio-item';
-        audioItem.setAttribute('role', 'menuitem');
-
-        const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
-        const activeTrack = audioTracks.find(t => t.index === activeTrackIndex) || audioTracks[0];
-        const friendlyLang = getFriendlyLanguage(activeTrack.language);
-
-        audioItem.innerHTML = `
-          <span>Áudio</span>
-          <span class="plyr__menu__value" style="color: var(--primary); font-weight: 600;">${friendlyLang} (${activeTrack.title})</span>
-        `;
-
-        audioItem.addEventListener('click', () => {
-          const currentIndex = audioTracks.indexOf(activeTrack);
-          const nextIndex = (currentIndex + 1) % audioTracks.length;
-          const nextTrack = audioTracks[nextIndex];
-          
-          const currentTime = activePlayer.currentTime;
-          console.log(`[Transcode Menu] Alterando faixa de áudio no player para #${nextTrack.index} (${nextTrack.language}) a partir de ${currentTime}s...`);
-          initPlayer(media, streamMagnetId, fileIndex, fileName, nextTrack.index, currentTime);
-        });
-
-        menu.appendChild(audioItem);
-      }
-    };
-
-    // 7. Busca trilhas e injeta no menu de forma paralela e resiliente com retentativas
-    let tracksLoaded = false;
-    let retries = 0;
-    const maxRetries = 15;
-
-    const loadTracksResilient = () => {
-      if (!transcodeAudio || tracksLoaded || retries >= maxRetries) return;
-
-      console.log(`[Tracks] Buscando trilhas via ffprobe (tentativa ${retries + 1}/${maxRetries})...`);
-      
+    // 7. Busca Trilhas de Áudio via FFprobe e injeta no menu do ArtPlayer
+    if (transcodeAudio) {
+      console.log(`[ArtPlayer Tracks] Buscando trilhas de áudio via ffprobe...`);
       fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       })
-      .then(res => {
-        if (!res.ok) throw new Error('Status HTTP inválido');
-        return res.json();
-      })
+      .then(res => res.ok ? res.json() : { streams: [] })
       .then(tData => {
         const streams = (tData && tData.streams) || [];
         if (streams.length > 1) {
-          console.log(`[Tracks] ${streams.length} trilhas de áudio encontradas! Injetando no menu...`);
-          tracksLoaded = true;
-          audioTracks = streams;
-          
-          injectAudioMenu();
+          console.log(`[ArtPlayer Tracks] ${streams.length} trilhas de áudio encontradas! Adicionando no menu do player...`);
 
-          // Vincula o clique da engrenagem
-          const plyrContainer = videoElement.closest('.plyr');
-          if (plyrContainer) {
-            const settingsBtn = plyrContainer.querySelector('[data-plyr="settings"]');
-            if (settingsBtn && !settingsBtn.dataset.audioHandlerBound) {
-              settingsBtn.dataset.audioHandlerBound = "true";
-              settingsBtn.addEventListener('click', () => {
-                setTimeout(injectAudioMenu, 80);
-              });
+          const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
+          const activeTrack = streams.find(t => t.index === activeTrackIndex) || streams[0];
+          const activeLabel = `${getFriendlyLanguage(activeTrack.language)} (${activeTrack.title})`;
+
+          activePlayer.setting.add({
+            html: 'Faixa de Áudio',
+            tooltip: activeLabel,
+            selector: streams.map(tr => ({
+              default: tr.index === activeTrackIndex,
+              html: `${getFriendlyLanguage(tr.language)} (${tr.title})`,
+              index: tr.index
+            })),
+            onSelect(item) {
+              const currentTime = activePlayer.currentTime;
+              console.log(`[ArtPlayer Audio] Alternando para faixa de áudio #${item.index} em ${currentTime}s...`);
+              initPlayer(media, streamMagnetId, fileIndex, fileName, item.index, currentTime);
+              return item.html;
             }
-          }
-        } else {
-          console.log('[Tracks] Apenas 1 trilha de áudio ou nenhuma encontrada. Sem necessidade de menu.');
-          tracksLoaded = true;
+          });
         }
       })
       .catch(e => {
-        console.warn(`[Tracks] Falha ao carregar trilhas na tentativa ${retries + 1}:`, e.message);
-        retries++;
-        // Retenta a cada 3.5 segundos
-        setTimeout(loadTracksResilient, 3500);
+        console.warn('[ArtPlayer Tracks] Falha ao carregar trilhas de áudio:', e.message);
       });
-    };
+    }
 
-    // Inicia a busca resiliente em paralelo
-    loadTracksResilient();
-
-    // Como salvaguarda extra, tenta carregar também no evento 'playing' do vídeo
-    videoElement.addEventListener('playing', () => {
-      if (transcodeAudio && !tracksLoaded) {
-        loadTracksResilient();
-      }
-    });
-
-    // 8. Tratamento de Seek para Streams Transcodificados
+    // 8. Se Seek for feito em Stream Transcodificado
     if (transcodeAudio && targetAudioTrack !== null) {
       let lastTime = startTime;
-      
-      activePlayer.on('timeupdate', () => {
-        if (!videoElement.seeking) {
-          lastTime = videoElement.currentTime;
+      activePlayer.on('video:timeupdate', () => {
+        if (!activePlayer.isSeeking) {
+          lastTime = activePlayer.currentTime;
         }
       });
 
-      activePlayer.on('seeking', () => {
-        const newTime = videoElement.currentTime;
+      activePlayer.on('video:seeking', () => {
+        const newTime = activePlayer.currentTime;
         if (Math.abs(newTime - lastTime) > 3) {
-          console.log(`[Transcode Seek] Reiniciando transcodificação a partir de ${newTime}s...`);
+          console.log(`[ArtPlayer Seek] Reiniciando transcodificação em ${newTime}s...`);
           initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack, newTime);
         }
       });
     }
 
-    // Tenta iniciar a reprodução
-    activePlayer.on('ready', () => {
-      activePlayer.play().catch(() => {
-        console.log('Autoplay bloqueado pelo navegador, aguardando clique.');
+    // Se houver tempo inicial (após seek ou troca de áudio)
+    if (startTime > 0) {
+      activePlayer.on('ready', () => {
+        activePlayer.currentTime = startTime;
       });
-    });
+    }
   })
   .catch(err => {
-    console.error('Erro na inicialização do player:', err);
+    console.error('Erro na inicialização do ArtPlayer:', err);
   });
 }
 
