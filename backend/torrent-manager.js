@@ -8,52 +8,91 @@ const __dirname = path.dirname(__filename);
 
 let client = null;
 
+// Lista de trackers públicos de alta disponibilidade para acelerar conexões P2P e resgatar magnet links sem trackers integrados
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://tracker.openbittorrent.com:80/announce',
+  'http://tracker.opentrackr.org:1337/announce',
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.btorrent.xyz',
+  'wss://tracker.files.fm:7072/announce'
+];
+
 // Inicializa a instância única (Singleton) do WebTorrent
 export function getClient() {
   if (!client) {
     client = new WebTorrent({
-      maxConns: 55, // Limite de conexões para evitar sobrecarga
+      maxConns: 60, // Limite de conexões otimizado
     });
   }
   return client;
 }
 
-// Adiciona um link magnet e aguarda o carregamento dos metadados
-export async function addTorrent(magnetUrl, timeoutMs = 15000) {
-  const wt = getClient();
-  
-  // Extrai o infoHash do magnet para verificar se já existe no cliente
-  let infoHash = null;
+// Corrige erros comuns em URLs de magnet (ex: /anunciar em vez de /announce)
+function sanitizeMagnetUrl(magnetUrl) {
+  if (!magnetUrl) return magnetUrl;
+  return magnetUrl.replace(/\/anunciar\b/gi, '/announce');
+}
+
+// Extrai o infoHash em formato hex de 40 caracteres ou string base32 do magnet link
+function extractInfoHash(magnetUrl) {
   try {
-    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]+)/i) || magnetUrl.match(/xt=urn:btih:([2-7a-zA-Z]+)/i);
+    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{40})/i) || magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{32})/i) || magnetUrl.match(/xt=urn:btih:([2-7a-zA-Z]{32})/i);
     if (match) {
-      infoHash = match[1].toLowerCase();
+      return match[1].toLowerCase();
     }
   } catch (e) {
     console.error('Erro ao parsear magnet link:', e);
   }
+  return null;
+}
 
-  // Se o torrent já estiver no cliente, retorna-o imediatamente
-  // Se o torrent já estiver no cliente, aguarda a resolução dos metadados caso ainda não estejam prontos
+// Helper interno para verificar se o objeto Torrent tem metadados/arquivos carregados
+function isTorrentReady(t) {
+  if (!t) return false;
+  return Boolean(t.ready || (t.files && t.files.length > 0));
+}
+
+// Adiciona um link magnet e aguarda o carregamento dos metadados
+export async function addTorrent(rawMagnetUrl, timeoutMs = 25000) {
+  const wt = getClient();
+  const magnetUrl = sanitizeMagnetUrl(rawMagnetUrl);
+  const infoHash = extractInfoHash(magnetUrl);
+
+  // 1. Se o torrent já estiver no cliente, recupera e verifica se já está pronto
   if (infoHash) {
     try {
-      const existing = await wt.get(infoHash);
+      const existing = (await wt.get(infoHash)) || (await wt.get(magnetUrl)) || wt.torrents.find(t => 
+        (t.infoHash && t.infoHash.toLowerCase() === infoHash) || t.magnetURI === magnetUrl
+      );
+
       if (existing) {
-        if (existing.metadata) {
+        if (isTorrentReady(existing)) {
           return existing;
         }
-        // Se existe mas ainda está conectando, espera pelo evento 'metadata'
+
+        // Se existe mas ainda está carregando metadados, aguarda eventos 'ready' ou 'metadata'
         return new Promise((resolve, reject) => {
           const timeoutId = setTimeout(() => {
-            if (!existing.metadata) {
+            if (!isTorrentReady(existing)) {
               reject(new Error('Tempo limite esgotado para obter metadados do Torrent (Sem peers/seeders ativos).'));
+            } else {
+              resolve(existing);
             }
           }, timeoutMs);
 
-          existing.once('metadata', () => {
+          const onReady = () => {
             clearTimeout(timeoutId);
             resolve(existing);
-          });
+          };
+
+          existing.once('ready', onReady);
+          existing.once('metadata', onReady);
 
           existing.once('error', (err) => {
             clearTimeout(timeoutId);
@@ -66,27 +105,34 @@ export async function addTorrent(magnetUrl, timeoutMs = 15000) {
     }
   }
 
-  return new Promise((resolve, reject) => {
+  // 2. Se o torrent não existe no cliente, adiciona com a lista expandida de trackers
+  return new Promise(async (resolve, reject) => {
     try {
       const cachePath = path.resolve(__dirname, 'cache');
-      const torrent = wt.add(magnetUrl, { path: cachePath });
+      const torrent = wt.add(magnetUrl, { 
+        path: cachePath,
+        announce: DEFAULT_TRACKERS
+      });
 
-      // Se os metadados já estiverem prontos, resolve
-      if (torrent.metadata) {
+      if (isTorrentReady(torrent)) {
         return resolve(torrent);
       }
 
-      // Responder ao cliente após o timeout para não travar a requisição, mas mantendo a conexão ativa em background
       const timeoutId = setTimeout(() => {
-        if (!torrent.metadata) {
+        if (!isTorrentReady(torrent)) {
           reject(new Error('Tempo limite esgotado para obter metadados do Torrent (Sem peers/seeders ativos).'));
+        } else {
+          resolve(torrent);
         }
       }, timeoutMs);
 
-      torrent.once('metadata', () => {
+      const onReady = () => {
         clearTimeout(timeoutId);
         resolve(torrent);
-      });
+      };
+
+      torrent.once('ready', onReady);
+      torrent.once('metadata', onReady);
 
       torrent.once('error', (err) => {
         clearTimeout(timeoutId);
@@ -96,6 +142,20 @@ export async function addTorrent(magnetUrl, timeoutMs = 15000) {
         reject(err);
       });
     } catch (e) {
+      // Trata exceção síncrona de duplicata (caso o WebTorrent recuse adicionar novamente)
+      if (e.message && e.message.includes('duplicate')) {
+        const dup = (await wt.get(infoHash)) || (await wt.get(magnetUrl)) || wt.torrents.find(t => 
+          (t.infoHash && t.infoHash.toLowerCase() === infoHash) || t.magnetURI === magnetUrl
+        );
+        if (dup) {
+          if (isTorrentReady(dup)) {
+            return resolve(dup);
+          }
+          dup.once('ready', () => resolve(dup));
+          dup.once('metadata', () => resolve(dup));
+          return;
+        }
+      }
       reject(e);
     }
   });
@@ -104,5 +164,8 @@ export async function addTorrent(magnetUrl, timeoutMs = 15000) {
 // Recupera um torrent ativo no cliente pelo infoHash
 export async function getTorrent(infoHash) {
   const wt = getClient();
-  return await wt.get(infoHash.toLowerCase());
+  if (!infoHash) return null;
+  const hash = infoHash.toLowerCase();
+  return (await wt.get(hash)) || wt.torrents.find(t => t.infoHash && t.infoHash.toLowerCase() === hash);
 }
+

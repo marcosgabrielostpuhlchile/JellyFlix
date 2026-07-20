@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { spawn } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 import db from '../db.js';
@@ -54,14 +56,14 @@ router.get('/:id/:fileIndex', async (req, res) => {
       const ffmpegArgs = [
         '-ss', startTime.toString(), // Seek rápido na entrada
         '-i', internalStreamUrl,     // URL local de stream direto do torrent
-        '-map', '0:v:0',              // Copia o primeiro stream de vídeo
+        '-map', '0:v:0?',            // Copia o primeiro stream de vídeo (opcional se não houver vídeo)
       ];
 
       if (audioTrackIdx !== undefined) {
         const audioIdx = parseInt(audioTrackIdx, 10);
-        ffmpegArgs.push('-map', `0:${audioIdx}`); // Mapeia o stream absoluto correto
+        ffmpegArgs.push('-map', `0:${audioIdx}?`); // Mapeia o stream absoluto correto
       } else {
-        ffmpegArgs.push('-map', '0:a:0'); // Fallback para o primeiro áudio disponível (padrão)
+        ffmpegArgs.push('-map', '0:a:0?'); // Fallback opcional para o primeiro áudio disponível (padrão)
       }
 
       ffmpegArgs.push(
@@ -105,57 +107,118 @@ router.get('/:id/:fileIndex', async (req, res) => {
       return;
     }
 
-    // Lógica original de Direct Stream (Direct Play)
-    const torrent = await addTorrent(magnet.magnet_url);
-    const file = torrent.files[idx];
-    
-    if (!file) {
-      return res.status(404).json({ error: 'Arquivo de vídeo não encontrado neste torrent.' });
+    // Lógica de Direct Stream (Verifica cache local em disco primeiro para resposta instantânea)
+    let torrent;
+    let localFilePath = null;
+    let fileSize = 0;
+    let fileName = '';
+
+    // 1. Tenta verificar se o arquivo já foi baixado/salvo no disco local
+    if (magnet.files) {
+      try {
+        const cached = JSON.parse(magnet.files);
+        const videoFiles = Array.isArray(cached) ? cached : (cached.videoFiles || []);
+        const fileMeta = videoFiles[idx] || videoFiles.find(f => f.index === idx);
+        if (fileMeta) {
+          const cacheDir = path.resolve(process.cwd(), 'cache');
+          
+          const possiblePaths = [
+            path.join(cacheDir, fileMeta.path || ''),
+            path.join(cacheDir, magnet.title || '', fileMeta.name || ''),
+            path.join(cacheDir, fileMeta.name || '')
+          ];
+
+          for (const p of possiblePaths) {
+            if (p && fs.existsSync(p)) {
+              localFilePath = p;
+              fileSize = fs.statSync(p).size;
+              fileName = fileMeta.name || path.basename(p);
+              console.log(`[Local Stream Instant] Servindo mídia do disco local: ${p}`);
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Local Stream Check] Erro ao checar disco local:', e.message);
+      }
     }
 
-    const mimeType = getMimeType(file.name);
+    // 2. Se o arquivo não está no disco local, conecta via WebTorrent P2P
+    if (!localFilePath) {
+      try {
+        torrent = await addTorrent(magnet.magnet_url, 25000);
+        const file = torrent.files[idx];
+        if (!file) {
+          return res.status(404).json({ error: 'Arquivo de vídeo não encontrado neste torrent.' });
+        }
+        fileSize = file.length;
+        fileName = file.name;
+      } catch (err) {
+        // Tenta recuperar do cliente WebTorrent se já houver torrent instanciado
+        const wt = (await import('../torrent-manager.js')).getClient();
+        const infoHash = magnet.info_hash ? magnet.info_hash.toLowerCase() : null;
+        const existing = infoHash ? ((await wt.get(infoHash)) || wt.torrents.find(t => t.infoHash && t.infoHash.toLowerCase() === infoHash)) : null;
+        if (existing && existing.files && existing.files[idx]) {
+          torrent = existing;
+          fileSize = existing.files[idx].length;
+          fileName = existing.files[idx].name;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const mimeType = getMimeType(fileName);
     const range = req.headers.range;
+
+    // Helper para criar o stream de leitura (seja via WebTorrent ou fs)
+    const createStream = (options) => {
+      if (localFilePath) {
+        return fs.createReadStream(localFilePath, options);
+      }
+      return torrent.files[idx].createReadStream(options);
+    };
 
     // Se o navegador não enviou cabeçalho Range, transmite o arquivo completo
     if (!range) {
       res.writeHead(200, {
-        'Content-Length': file.length,
+        'Content-Length': fileSize,
         'Content-Type': mimeType,
         'Accept-Ranges': 'bytes'
       });
-      const stream = file.createReadStream();
+      const stream = createStream();
       stream.on('error', (err) => {
         console.log('[Stream Info] Stream completo interrompido/fechado:', err.message);
       });
       stream.pipe(res);
 
       req.on('close', () => {
-        stream.destroy();
+        if (stream.destroy) stream.destroy();
       });
     } else {
       // Transmissão de fatia parcial (Range Request / HTTP 206)
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : file.length - 1;
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
       // Se a faixa solicitada for inválida
-      if (start >= file.length || end >= file.length) {
+      if (start >= fileSize || end >= fileSize) {
         res.writeHead(416, {
-          'Content-Range': `bytes */${file.length}`
+          'Content-Range': `bytes */${fileSize}`
         });
         return res.end();
       }
 
       const chunkSize = (end - start) + 1;
       res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${file.length}`,
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': mimeType
       });
 
       // Cria um stream de leitura limitado à faixa solicitada
-      const stream = file.createReadStream({ start, end });
+      const stream = createStream({ start, end });
       stream.on('error', (err) => {
         console.log('[Stream Info] Stream parcial (range) interrompido/fechado:', err.message);
       });
@@ -163,7 +226,7 @@ router.get('/:id/:fileIndex', async (req, res) => {
 
       // Fecha o fluxo e limpa buffers quando o usuário fecha ou pausa o player
       req.on('close', () => {
-        stream.destroy();
+        if (stream.destroy) stream.destroy();
       });
     }
   } catch (err) {
