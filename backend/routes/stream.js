@@ -29,7 +29,7 @@ router.get('/:id/:fileIndex', async (req, res) => {
   const noTranscode = req.query.noTranscode === 'true';
   const audioTrackIdx = req.query.audioTrack;
   const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
-  const transcodeEnabled = transcodeRow && transcodeRow.value === '1';
+  const transcodeEnabled = (transcodeRow && transcodeRow.value === '1') || audioTrackIdx !== undefined;
 
   try {
     const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);

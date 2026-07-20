@@ -277,10 +277,14 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
     }
 
     let streamUrl = `/api/stream/${streamMagnetId}/${fileIndex}`;
-    if (transcodeAudio && targetAudioTrack !== null) {
+    if (targetAudioTrack !== null) {
       streamUrl += `?audioTrack=${targetAudioTrack}`;
       if (startTime > 0) {
         streamUrl += `&startTime=${startTime}`;
+      }
+    } else if (transcodeAudio) {
+      if (startTime > 0) {
+        streamUrl += `?startTime=${startTime}`;
       }
     }
 
@@ -413,46 +417,44 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       });
     }
 
-    // 7. Busca Trilhas de Áudio via FFprobe e injeta no menu do ArtPlayer
-    if (transcodeAudio) {
-      console.log(`[ArtPlayer Tracks] Buscando trilhas de áudio via ffprobe...`);
-      fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      })
-      .then(res => res.ok ? res.json() : { streams: [] })
-      .then(tData => {
-        const streams = (tData && tData.streams) || [];
-        if (streams.length > 1) {
-          console.log(`[ArtPlayer Tracks] ${streams.length} trilhas de áudio encontradas! Adicionando no menu do player...`);
+    // 7. Busca Trilhas de Áudio via FFprobe e injeta no menu do ArtPlayer (Sempre ativo para dual-audio)
+    console.log(`[ArtPlayer Tracks] Buscando trilhas de áudio via ffprobe...`);
+    fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    .then(res => res.ok ? res.json() : { streams: [] })
+    .then(tData => {
+      const streams = (tData && tData.streams) || [];
+      if (streams.length > 1) {
+        console.log(`[ArtPlayer Tracks] ${streams.length} trilhas de áudio encontradas! Adicionando no menu do player...`);
 
-          const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
-          const activeTrack = streams.find(t => t.index === activeTrackIndex) || streams[0];
-          const activeLabel = `${getFriendlyLanguage(activeTrack.language)} (${activeTrack.title})`;
+        const activeTrackIndex = targetAudioTrack === null ? 0 : parseInt(targetAudioTrack, 10);
+        const activeTrack = streams.find(t => t.index === activeTrackIndex) || streams[0];
+        const activeLabel = `${getFriendlyLanguage(activeTrack.language)} (${activeTrack.title})`;
 
-          activePlayer.setting.add({
-            html: 'Faixa de Áudio',
-            tooltip: activeLabel,
-            selector: streams.map(tr => ({
-              default: tr.index === activeTrackIndex,
-              html: `${getFriendlyLanguage(tr.language)} (${tr.title})`,
-              index: tr.index
-            })),
-            onSelect(item) {
-              const currentTime = activePlayer.currentTime;
-              console.log(`[ArtPlayer Audio] Alternando para faixa de áudio #${item.index} em ${currentTime}s...`);
-              initPlayer(media, streamMagnetId, fileIndex, fileName, item.index, currentTime);
-              return item.html;
-            }
-          });
-        }
-      })
-      .catch(e => {
-        console.warn('[ArtPlayer Tracks] Falha ao carregar trilhas de áudio:', e.message);
-      });
-    }
+        activePlayer.setting.add({
+          html: 'Faixa de Áudio',
+          tooltip: activeLabel,
+          selector: streams.map(tr => ({
+            default: tr.index === activeTrackIndex,
+            html: `${getFriendlyLanguage(tr.language)} (${tr.title})`,
+            index: tr.index
+          })),
+          onSelect(item) {
+            const currentTime = activePlayer.currentTime;
+            console.log(`[ArtPlayer Audio] Alternando para faixa de áudio #${item.index} em ${currentTime}s...`);
+            initPlayer(media, streamMagnetId, fileIndex, fileName, item.index, currentTime);
+            return item.html;
+          }
+        });
+      }
+    })
+    .catch(e => {
+      console.warn('[ArtPlayer Tracks] Falha ao carregar trilhas de áudio:', e.message);
+    });
 
     // 8. Se Seek for feito em Stream Transcodificado
-    if (transcodeAudio && targetAudioTrack !== null) {
+    if (targetAudioTrack !== null || transcodeAudio) {
       let lastTime = startTime;
       activePlayer.on('video:timeupdate', () => {
         if (!activePlayer.isSeeking) {
