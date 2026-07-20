@@ -28,8 +28,9 @@ router.get('/:id/:fileIndex', async (req, res) => {
 
   const noTranscode = req.query.noTranscode === 'true';
   const audioTrackIdx = req.query.audioTrack;
+  const targetQuality = req.query.quality; // '1080p', '720p', '480p', '360p' ou 'original'
   const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
-  const transcodeEnabled = (transcodeRow && transcodeRow.value === '1') || audioTrackIdx !== undefined;
+  const transcodeEnabled = (transcodeRow && transcodeRow.value === '1') || audioTrackIdx !== undefined || (targetQuality && targetQuality !== 'original');
 
   try {
     const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
@@ -44,7 +45,7 @@ router.get('/:id/:fileIndex', async (req, res) => {
       // Define a URL interna para o FFmpeg ler o stream direto (com noTranscode=true)
       const internalStreamUrl = `http://localhost:${process.env.PORT || 3000}/api/stream/${id}/${fileIndex}?noTranscode=true`;
 
-      console.log(`[Transcode] Iniciando FFmpeg. Faixa: ${audioTrackIdx !== undefined ? '#' + audioTrackIdx : 'padrão (0:a:0)'} a partir de ${startTime}s...`);
+      console.log(`[Transcode] Iniciando FFmpeg. Qualidade: ${targetQuality || 'Original'}, Faixa: ${audioTrackIdx !== undefined ? '#' + audioTrackIdx : 'padrão (0:a:0)'} a partir de ${startTime}s...`);
 
       // Configura os cabeçalhos de resposta para streaming contínuo de MP4 fragmentado
       res.writeHead(200, {
@@ -66,8 +67,26 @@ router.get('/:id/:fileIndex', async (req, res) => {
         ffmpegArgs.push('-map', '0:a:0?'); // Fallback opcional para o primeiro áudio disponível (padrão)
       }
 
+      // Configura escalonamento de vídeo conforme a qualidade selecionada
+      if (targetQuality && targetQuality !== 'original') {
+        let height = 720;
+        let crf = 24;
+        if (targetQuality === '1080p') { height = 1080; crf = 22; }
+        else if (targetQuality === '720p') { height = 720; crf = 24; }
+        else if (targetQuality === '480p') { height = 480; crf = 26; }
+        else if (targetQuality === '360p') { height = 360; crf = 28; }
+
+        ffmpegArgs.push(
+          '-vf', `scale=-2:${height}`,
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', crf.toString()
+        );
+      } else {
+        ffmpegArgs.push('-c:v', 'copy'); // Copia vídeo sem reprocessar (0% CPU)
+      }
+
       ffmpegArgs.push(
-        '-c:v', 'copy',               // Copia vídeo sem processar (0% CPU de vídeo)
         '-c:a', 'aac',                // Transcodifica áudio para AAC
         '-b:a', '192k',               // Bitrate do áudio
         '-f', 'mp4',                  // Output em MP4 fragmentado

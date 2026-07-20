@@ -204,7 +204,7 @@ function parseSeasonFromTitle(title) {
   return 1;
 }
 
-function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack = null, startTime = 0) {
+function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack = null, startTime = 0, targetQuality = 'original') {
   // 1. Destrói o player anterior de forma garantida
   destroyActivePlayer();
 
@@ -277,16 +277,11 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
     }
 
     let streamUrl = `/api/stream/${streamMagnetId}/${fileIndex}`;
-    if (targetAudioTrack !== null) {
-      streamUrl += `?audioTrack=${targetAudioTrack}`;
-      if (startTime > 0) {
-        streamUrl += `&startTime=${startTime}`;
-      }
-    } else if (transcodeAudio) {
-      if (startTime > 0) {
-        streamUrl += `?startTime=${startTime}`;
-      }
-    }
+    const queryParams = [];
+    if (targetAudioTrack !== null) queryParams.push(`audioTrack=${targetAudioTrack}`);
+    if (targetQuality && targetQuality !== 'original') queryParams.push(`quality=${targetQuality}`);
+    if (startTime > 0) queryParams.push(`startTime=${startTime}`);
+    if (queryParams.length > 0) streamUrl += `?${queryParams.join('&')}`;
 
     // Prepara as opções de legendas para o ArtPlayer
     let subtitleOption = { url: '', type: 'vtt' };
@@ -417,7 +412,27 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       });
     }
 
-    // 7. Busca Trilhas de Áudio via FFprobe e injeta no menu do ArtPlayer (Sempre ativo para dual-audio)
+    // 7. Adiciona Seletor de Qualidade de Vídeo no Menu do ArtPlayer
+    const activeQualityLabel = targetQuality && targetQuality !== 'original' ? targetQuality.toUpperCase() : 'Original';
+    activePlayer.setting.add({
+      html: 'Qualidade do Vídeo',
+      tooltip: activeQualityLabel,
+      selector: [
+        { default: !targetQuality || targetQuality === 'original', html: 'Original (Mais Rápido / 0% CPU)', quality: 'original' },
+        { default: targetQuality === '1080p', html: '1080p (Full HD)', quality: '1080p' },
+        { default: targetQuality === '720p', html: '720p (HD)', quality: '720p' },
+        { default: targetQuality === '480p', html: '480p (SD - Economia)', quality: '480p' },
+        { default: targetQuality === '360p', html: '360p (Móvel)', quality: '360p' }
+      ],
+      onSelect(item) {
+        const currentTime = activePlayer.currentTime;
+        console.log(`[ArtPlayer Quality] Alternando qualidade para ${item.quality} a partir de ${currentTime}s...`);
+        initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack, currentTime, item.quality);
+        return item.html;
+      }
+    });
+
+    // 8. Busca Trilhas de Áudio via FFprobe e injeta no menu do ArtPlayer
     console.log(`[ArtPlayer Tracks] Buscando trilhas de áudio via ffprobe...`);
     fetch(`/api/media/${streamMagnetId}/files/${fileIndex}/tracks`, {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -443,7 +458,7 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
           onSelect(item) {
             const currentTime = activePlayer.currentTime;
             console.log(`[ArtPlayer Audio] Alternando para faixa de áudio #${item.index} em ${currentTime}s...`);
-            initPlayer(media, streamMagnetId, fileIndex, fileName, item.index, currentTime);
+            initPlayer(media, streamMagnetId, fileIndex, fileName, item.index, currentTime, targetQuality);
             return item.html;
           }
         });
@@ -453,8 +468,8 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
       console.warn('[ArtPlayer Tracks] Falha ao carregar trilhas de áudio:', e.message);
     });
 
-    // 8. Se Seek for feito em Stream Transcodificado
-    if (targetAudioTrack !== null || transcodeAudio) {
+    // 9. Se Seek for feito em Stream Transcodificado
+    if (targetAudioTrack !== null || (targetQuality && targetQuality !== 'original') || transcodeAudio) {
       let lastTime = startTime;
       activePlayer.on('video:timeupdate', () => {
         if (!activePlayer.isSeeking) {
@@ -466,12 +481,12 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
         const newTime = activePlayer.currentTime;
         if (Math.abs(newTime - lastTime) > 3) {
           console.log(`[ArtPlayer Seek] Reiniciando transcodificação em ${newTime}s...`);
-          initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack, newTime);
+          initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack, newTime, targetQuality);
         }
       });
     }
 
-    // Se houver tempo inicial (após seek ou troca de áudio)
+    // Se houver tempo inicial (após seek ou troca de áudio/qualidade)
     if (startTime > 0) {
       activePlayer.on('ready', () => {
         activePlayer.currentTime = startTime;
