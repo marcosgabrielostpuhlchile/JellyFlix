@@ -74,9 +74,9 @@ function showToast(message, type = 'info') {
 
 // ==================== GERENCIADOR DO PLAYER ÚNICO ==================== //
 
-function destroyActivePlayer() {
-  // Se houver uma mídia em reprodução e a opção de auto-exclusão do cache estiver ativa
-  if (currentPlayingMagnetId) {
+function destroyActivePlayer(newMagnetId = null) {
+  // Se houver uma mídia em reprodução anterior e for diferente da nova mídia sendo iniciada
+  if (currentPlayingMagnetId && currentPlayingMagnetId !== newMagnetId) {
     const targetIdToDelete = currentPlayingMagnetId;
     currentPlayingMagnetId = null;
     
@@ -86,7 +86,7 @@ function destroyActivePlayer() {
     .then(res => res.json())
     .then(sData => {
       if (sData.autoDeleteWatched) {
-        console.log(`[Auto Delete Cache] Excluindo cache da mídia #${targetIdToDelete}...`);
+        console.log(`[Auto Delete Cache] Excluindo cache da mídia anterior #${targetIdToDelete}...`);
         fetch(`/api/media/${targetIdToDelete}/cache`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -94,7 +94,7 @@ function destroyActivePlayer() {
         .then(res => res.json())
         .then(d => {
           if (d.success && d.deletedAny) {
-            showToast('Arquivos do cache excluídos com sucesso após a reprodução.', 'info');
+            showToast('Arquivos do cache excluídos com sucesso após o uso.', 'info');
           }
         })
         .catch(e => console.error('Erro ao excluir cache:', e));
@@ -235,8 +235,8 @@ function parseSeasonFromTitle(title) {
 }
 
 function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack = null, startTime = 0, targetQuality = 'original') {
-  // 1. Destrói o player anterior de forma garantida
-  destroyActivePlayer();
+  // 1. Destrói o player anterior passando o novo ID para preservar o cache do arquivo atual
+  destroyActivePlayer(streamMagnetId);
 
   // Registra o ID do magnet atualmente em reprodução para limpeza de cache pós-visualização
   currentPlayingMagnetId = streamMagnetId;
