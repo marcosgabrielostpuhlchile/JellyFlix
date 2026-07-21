@@ -538,16 +538,6 @@ router.delete('/:id/cache', authenticateToken, async (req, res) => {
   }
 });
 
-    res.json({
-      message: 'Configurações salvas com sucesso.',
-      tailscaleIp: getTailscaleIp(),
-      ngrokUrl: activeNgrokUrl || getNgrokUrl()
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao salvar configurações: ' + err.message });
-  }
-});
-
 // 3. IDENTIFICAÇÃO MANUAL (Protegido)
 router.post('/:id/identify', authenticateToken, async (req, res) => {
   const { id } = req.params;
