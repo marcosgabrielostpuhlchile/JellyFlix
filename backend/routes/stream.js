@@ -30,7 +30,6 @@ router.get('/:id/:fileIndex', async (req, res) => {
   const audioTrackIdx = req.query.audioTrack;
   const targetQuality = req.query.quality; // '1080p', '720p', '480p', '360p' ou 'original'
   const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
-  const transcodeEnabled = (transcodeRow && transcodeRow.value === '1') || audioTrackIdx !== undefined || (targetQuality && targetQuality !== 'original');
 
   try {
     const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
@@ -38,7 +37,25 @@ router.get('/:id/:fileIndex', async (req, res) => {
       return res.status(404).json({ error: 'Magnet não cadastrado.' });
     }
 
-    // Se a transcodificação estiver ativa e não for a chamada interna do FFmpeg
+    // Verifica se o arquivo é MKV/AVI/FLV/WMV (Formatos não suportados nativamente pelo HTML5 sem remux em MP4)
+    let isNonNativeContainer = false;
+    if (magnet.files) {
+      try {
+        const cached = JSON.parse(magnet.files);
+        const videoFiles = Array.isArray(cached) ? cached : (cached.videoFiles || []);
+        const fileMeta = videoFiles[idx] || videoFiles.find(f => f.index === idx);
+        if (fileMeta && fileMeta.name) {
+          const ext = path.extname(fileMeta.name).toLowerCase();
+          if (ext === '.mkv' || ext === '.avi' || ext === '.flv' || ext === '.wmv' || ext === '.ts') {
+            isNonNativeContainer = true;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const transcodeEnabled = (transcodeRow && transcodeRow.value === '1') || audioTrackIdx !== undefined || (targetQuality && targetQuality !== 'original') || isNonNativeContainer;
+
+    // Se a transcodificação/remux estiver ativa e não for a chamada interna do FFmpeg
     if (!noTranscode && transcodeEnabled) {
       const startTime = parseFloat(req.query.startTime || 0);
 
