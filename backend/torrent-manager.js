@@ -105,16 +105,30 @@ export async function addTorrent(rawMagnetUrl, timeoutMs = 25000) {
     }
   }
 
-  // 2. Se o torrent não existe no cliente, adiciona com a lista expandida de trackers
+  // Helper interno para verificar se o objeto Torrent tem metadados/arquivos carregados
+  function setupTorrentOnDemand(t) {
+    if (!t) return;
+    try {
+      if (t.deselect && t.pieces) {
+        // Cancela o download completo automático de todos os arquivos em segundo plano.
+        // O WebTorrent passará a baixar APENAS os trechos de vídeo solicitados pelo player em tempo real.
+        t.deselect(0, t.pieces.length - 1, 0);
+      }
+    } catch (e) {}
+  }
+
+  // 2. Se o torrent não existe no cliente, adiciona com a lista expandida de trackers e deselect: true
   return new Promise(async (resolve, reject) => {
     try {
       const cachePath = path.resolve(__dirname, 'cache');
       const torrent = wt.add(magnetUrl, { 
         path: cachePath,
-        announce: DEFAULT_TRACKERS
+        announce: DEFAULT_TRACKERS,
+        deselect: true // Não pré-baixa os arquivos inteiros em segundo plano
       });
 
       if (isTorrentReady(torrent)) {
+        setupTorrentOnDemand(torrent);
         return resolve(torrent);
       }
 
@@ -122,12 +136,14 @@ export async function addTorrent(rawMagnetUrl, timeoutMs = 25000) {
         if (!isTorrentReady(torrent)) {
           reject(new Error('Tempo limite esgotado para obter metadados do Torrent (Sem peers/seeders ativos).'));
         } else {
+          setupTorrentOnDemand(torrent);
           resolve(torrent);
         }
       }, timeoutMs);
 
       const onReady = () => {
         clearTimeout(timeoutId);
+        setupTorrentOnDemand(torrent);
         resolve(torrent);
       };
 
@@ -148,11 +164,18 @@ export async function addTorrent(rawMagnetUrl, timeoutMs = 25000) {
           (t.infoHash && t.infoHash.toLowerCase() === infoHash) || t.magnetURI === magnetUrl
         );
         if (dup) {
+          setupTorrentOnDemand(dup);
           if (isTorrentReady(dup)) {
             return resolve(dup);
           }
-          dup.once('ready', () => resolve(dup));
-          dup.once('metadata', () => resolve(dup));
+          dup.once('ready', () => {
+            setupTorrentOnDemand(dup);
+            resolve(dup);
+          });
+          dup.once('metadata', () => {
+            setupTorrentOnDemand(dup);
+            resolve(dup);
+          });
           return;
         }
       }
