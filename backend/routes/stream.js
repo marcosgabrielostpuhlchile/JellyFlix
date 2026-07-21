@@ -4,7 +4,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 import db from '../db.js';
-import { addTorrent } from '../torrent-manager.js';
+import { addTorrent, CACHE_DIR } from '../torrent-manager.js';
 
 const router = express.Router();
 
@@ -156,7 +156,7 @@ router.get('/:id/:fileIndex', async (req, res) => {
         const videoFiles = Array.isArray(cached) ? cached : (cached.videoFiles || []);
         const fileMeta = videoFiles[idx] || videoFiles.find(f => f.index === idx);
         if (fileMeta) {
-          const cacheDir = path.resolve(process.cwd(), 'cache');
+          const cacheDir = CACHE_DIR;
           
           const possiblePaths = [
             path.join(cacheDir, fileMeta.path || ''),

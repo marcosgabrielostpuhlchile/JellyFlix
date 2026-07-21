@@ -6,7 +6,7 @@ import { spawn } from 'child_process';
 import ffprobe from 'ffprobe-static';
 import db from '../db.js';
 import { authenticateToken } from './auth.js';
-import { addTorrent } from '../torrent-manager.js';
+import { addTorrent, CACHE_DIR } from '../torrent-manager.js';
 import { getTailscaleIp, getNgrokUrl, startNgrok, stopNgrok } from '../exposure-manager.js';
 
 const router = express.Router();
@@ -502,7 +502,7 @@ router.delete('/:id/cache', authenticateToken, async (req, res) => {
     }
 
     // 2. Apaga a pasta/arquivos físicos do cache
-    const cacheDir = path.resolve(process.cwd(), 'cache');
+    const cacheDir = CACHE_DIR;
     let deletedAny = false;
 
     if (magnet.files) {

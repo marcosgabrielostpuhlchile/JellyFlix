@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export const CACHE_DIR = path.resolve(__dirname, 'cache');
+
 let client = null;
 
 // Lista de trackers públicos de alta disponibilidade para acelerar conexões P2P e resgatar magnet links sem trackers integrados

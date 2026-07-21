@@ -375,12 +375,12 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
 
     const ext = fileName.split('.').pop().toLowerCase();
 
-    // 5. Instancia o ArtPlayer.js
+    // 5. Instancia o ArtPlayer.js (Todo stream remuxado ou MP4 nativo é entregue como mp4 ou webm)
     activePlayer = new Artplayer({
       container: container,
       url: streamUrl,
       title: media.title || fileName,
-      type: ext === 'webm' ? 'webm' : (ext === 'mkv' ? 'mkv' : 'mp4'),
+      type: ext === 'webm' ? 'webm' : 'mp4',
       volume: 0.7,
       isLive: false,
       muted: false,
