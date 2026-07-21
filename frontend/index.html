@@ -238,8 +238,19 @@
               <i class="fa-solid fa-circle-check"></i>
               <span>FFmpeg e FFprobe locais instalados automaticamente e prontos para uso.</span>
             </div>
+          <!-- Bloco Limpeza de Cache de Mídias -->
+          <div class="settings-card" style="margin-top: 20px;">
+            <h3><i class="fa-solid fa-trash-can purple-neon"></i> Limpeza de Cache do Servidor</h3>
+            <p class="helper-text">Configure se deseja manter as mídias salvas no computador ou apagá-las automaticamente após o uso.</p>
+            
+            <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-top: 10px; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="settings-auto-delete-watched" style="width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);">
+              <label for="settings-auto-delete-watched" style="margin-bottom: 0; font-size: 0.95rem; font-weight: 500; cursor: pointer;">
+                Excluir automaticamente o arquivo de vídeo do cache do computador após terminar ou fechar o player
+              </label>
+            </div>
           </div>
-          
+
           <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Salvar Configurações</button>
         </form>
       </section>

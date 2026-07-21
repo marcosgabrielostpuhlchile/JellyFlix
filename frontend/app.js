@@ -1,6 +1,7 @@
 // Estado global da aplicação
 let currentMediaId = null;
 let activePlayer = null;
+let currentPlayingMagnetId = null; // ID da mídia atualmente em reprodução
 let allMediaData = []; // Cache do catálogo para busca local rápida
 let currentCategoryFilter = 'all'; // 'all', 'movie', 'series', 'anime'
 let currentSubtitles = []; // Lista de legendas do torrent ativo
@@ -36,8 +37,9 @@ function checkAuth() {
 function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('username');
-  showToast('Sessão encerrada com sucesso.', 'info');
+  destroyActivePlayer();
   checkAuth();
+  showToast('Sessão encerrada com sucesso.', 'info');
 }
 
 // ==================== GERENCIADOR DE NOTIFICAÇÕES (TOAST) ==================== //
@@ -73,6 +75,34 @@ function showToast(message, type = 'info') {
 // ==================== GERENCIADOR DO PLAYER ÚNICO ==================== //
 
 function destroyActivePlayer() {
+  // Se houver uma mídia em reprodução e a opção de auto-exclusão do cache estiver ativa
+  if (currentPlayingMagnetId) {
+    const targetIdToDelete = currentPlayingMagnetId;
+    currentPlayingMagnetId = null;
+    
+    fetch('/api/media/settings', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    .then(res => res.json())
+    .then(sData => {
+      if (sData.autoDeleteWatched) {
+        console.log(`[Auto Delete Cache] Excluindo cache da mídia #${targetIdToDelete}...`);
+        fetch(`/api/media/${targetIdToDelete}/cache`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        })
+        .then(res => res.json())
+        .then(d => {
+          if (d.success && d.deletedAny) {
+            showToast('Arquivos do cache excluídos com sucesso após a reprodução.', 'info');
+          }
+        })
+        .catch(e => console.error('Erro ao excluir cache:', e));
+      }
+    })
+    .catch(() => {});
+  }
+
   // Garante a interrupção completa e eliminação do player anterior para evitar execução dupla
   if (activePlayer) {
     try {
@@ -207,6 +237,9 @@ function parseSeasonFromTitle(title) {
 function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack = null, startTime = 0, targetQuality = 'original') {
   // 1. Destrói o player anterior de forma garantida
   destroyActivePlayer();
+
+  // Registra o ID do magnet atualmente em reprodução para limpeza de cache pós-visualização
+  currentPlayingMagnetId = streamMagnetId;
 
   // 2. Atualiza o título do vídeo atual no player
   const playingFileTitle = document.getElementById('playing-file-title');
@@ -392,6 +425,12 @@ function initPlayer(media, streamMagnetId, fileIndex, fileName, targetAudioTrack
         }
       },
       subtitle: subtitleOption
+    });
+
+    // Evento de término do vídeo para expurgo do cache se configurado
+    activePlayer.on('video:ended', () => {
+      console.log('[ArtPlayer] Vídeo encerrado! Executando destruição e limpeza de cache se ativa...');
+      destroyActivePlayer();
     });
 
     // 6. Adiciona Seletor de Legendas no Menu de Configurações do ArtPlayer
@@ -1075,10 +1114,14 @@ async function showSettings() {
         ngrokGroup.style.display = 'none';
       }
 
-      // Atualiza o estado da transcodificação
+      // Atualiza o estado da transcodificação e exclusão automática do cache
       const transcodeCheckbox = document.getElementById('settings-transcode-audio');
       if (transcodeCheckbox) {
         transcodeCheckbox.checked = data.transcodeAudio || false;
+      }
+      const autoDeleteCheckbox = document.getElementById('settings-auto-delete-watched');
+      if (autoDeleteCheckbox) {
+        autoDeleteCheckbox.checked = data.autoDeleteWatched || false;
       }
 
       // Atualiza as informações do painel de exposição
@@ -1207,6 +1250,8 @@ function setupEventListeners() {
     const exposureType = document.getElementById('settings-exposure-type').value;
     const ngrokToken = document.getElementById('settings-ngrok-token').value.trim();
     const transcodeAudio = document.getElementById('settings-transcode-audio').checked;
+    const autoDeleteWatchedEl = document.getElementById('settings-auto-delete-watched');
+    const autoDeleteWatched = autoDeleteWatchedEl ? autoDeleteWatchedEl.checked : false;
 
     // Feedback visual do botão de envio
     const submitBtn = settingsForm.querySelector('button[type="submit"]');
@@ -1221,7 +1266,7 @@ function setupEventListeners() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ tmdbApiKey, exposureType, ngrokToken, transcodeAudio })
+        body: JSON.stringify({ tmdbApiKey, exposureType, ngrokToken, transcodeAudio, autoDeleteWatched })
       });
       
       const data = await res.json();

@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
 import { spawn } from 'child_process';
 import ffprobe from 'ffprobe-static';
@@ -410,17 +412,20 @@ router.get('/settings', authenticateToken, (req, res) => {
     const typeRow = db.prepare("SELECT value FROM settings WHERE key = 'exposure_type'").get();
     const tokenRow = db.prepare("SELECT value FROM settings WHERE key = 'ngrok_token'").get();
     const transcodeRow = db.prepare("SELECT value FROM settings WHERE key = 'transcode_audio'").get();
+    const autoDeleteRow = db.prepare("SELECT value FROM settings WHERE key = 'auto_delete_watched'").get();
 
     const tmdbApiKey = tmdbRow ? tmdbRow.value : '';
     const exposureType = typeRow ? typeRow.value : 'localhost';
     const ngrokToken = tokenRow ? tokenRow.value : '';
     const transcodeAudio = transcodeRow ? transcodeRow.value === '1' : false;
+    const autoDeleteWatched = autoDeleteRow ? autoDeleteRow.value === '1' : false;
 
     res.json({
       tmdbApiKey,
       exposureType,
       ngrokToken,
       transcodeAudio,
+      autoDeleteWatched,
       isFfmpegAvailable: true, // Auto-instalado localmente via npm
       tailscaleIp: getTailscaleIp(),
       ngrokUrl: getNgrokUrl()
@@ -432,13 +437,14 @@ router.get('/settings', authenticateToken, (req, res) => {
 
 // SALVA CONFIGURAÇÕES (Protegido)
 router.post('/settings', authenticateToken, async (req, res) => {
-  const { tmdbApiKey, exposureType, ngrokToken, transcodeAudio } = req.body;
+  const { tmdbApiKey, exposureType, ngrokToken, transcodeAudio, autoDeleteWatched } = req.body;
   try {
     // 1. Salva as configurações no banco
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('tmdb_api_key', ?)").run(tmdbApiKey || '');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('exposure_type', ?)").run(exposureType || 'localhost');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ngrok_token', ?)").run(ngrokToken || '');
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('transcode_audio', ?)").run(transcodeAudio ? '1' : '0');
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_delete_watched', ?)").run(autoDeleteWatched ? '1' : '0');
 
     let activeNgrokUrl = null;
     let errMessage = null;
@@ -455,13 +461,82 @@ router.post('/settings', authenticateToken, async (req, res) => {
     }
 
     if (errMessage) {
-      // Retorna 400 avisando sobre a falha no Ngrok, mas tendo gravado as configs no banco
       return res.status(400).json({
         error: `Configurações salvas no banco, mas falhou ao iniciar Ngrok: ${errMessage}`,
         tailscaleIp: getTailscaleIp(),
         ngrokUrl: null
       });
     }
+
+    res.json({
+      message: 'Configurações salvas com sucesso!',
+      tailscaleIp: getTailscaleIp(),
+      ngrokUrl: activeNgrokUrl
+    });
+  } catch (err) {
+    console.error('Erro ao salvar configurações:', err.message);
+    res.status(500).json({ error: 'Erro ao salvar configurações: ' + err.message });
+  }
+});
+
+// EXPURGA OS ARQUIVOS DO CACHE DE UM MAGNET (Protegido)
+router.delete('/:id/cache', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const magnet = db.prepare('SELECT * FROM magnets WHERE id = ?').get(id);
+    if (!magnet) {
+      return res.status(404).json({ error: 'Magnet não encontrado.' });
+    }
+
+    // 1. Encerra e destrói o torrent ativo no WebTorrent se estiver rodando
+    try {
+      const wt = (await import('../torrent-manager.js')).getClient();
+      const infoHash = magnet.info_hash ? magnet.info_hash.toLowerCase() : null;
+      const existing = infoHash ? ((await wt.get(infoHash)) || wt.torrents.find(t => t.infoHash && t.infoHash.toLowerCase() === infoHash)) : null;
+      if (existing) {
+        existing.destroy({ destroyStore: true });
+        console.log(`[Cache Cleanup] Torrent #${id} removido da memória do cliente WebTorrent.`);
+      }
+    } catch (e) {
+      console.log('[Cache Cleanup] Aviso ao remover torrent da memória:', e.message);
+    }
+
+    // 2. Apaga a pasta/arquivos físicos do cache
+    const cacheDir = path.resolve(process.cwd(), 'cache');
+    let deletedAny = false;
+
+    if (magnet.files) {
+      try {
+        const cached = JSON.parse(magnet.files);
+        const videoFiles = Array.isArray(cached) ? cached : (cached.videoFiles || []);
+        for (const f of videoFiles) {
+          if (f.path) {
+            const relativeTopFolder = f.path.split(/[\/\\]/)[0];
+            const topFolderPath = path.join(cacheDir, relativeTopFolder);
+            if (relativeTopFolder && fs.existsSync(topFolderPath) && topFolderPath !== cacheDir) {
+              fs.rmSync(topFolderPath, { recursive: true, force: true });
+              deletedAny = true;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (magnet.title) {
+      const titleFolder = path.join(cacheDir, magnet.title);
+      if (fs.existsSync(titleFolder)) {
+        fs.rmSync(titleFolder, { recursive: true, force: true });
+        deletedAny = true;
+      }
+    }
+
+    console.log(`[Cache Purge] Cache da mídia #${id} (${magnet.title}) expurgado com sucesso do disco.`);
+    res.json({ success: true, message: 'Arquivos do cache excluídos com sucesso.', deletedAny });
+  } catch (err) {
+    console.error('[Cache Purge] Erro ao excluir arquivos do cache:', err.message);
+    res.status(500).json({ error: 'Erro ao excluir cache: ' + err.message });
+  }
+});
 
     res.json({
       message: 'Configurações salvas com sucesso.',
