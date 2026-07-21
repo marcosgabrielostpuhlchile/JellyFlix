@@ -601,8 +601,8 @@ router.get('/:id/files', authenticateToken, async (req, res) => {
     let loadFromCache = false;
 
     try {
-      // Carrega o torrent (limite de 6 segundos para listar arquivos se não houver seeders)
-      torrent = await addTorrent(magnet.magnet_url, 6000);
+      // Carrega o torrent (limite de 18 segundos para listar arquivos se não houver seeders)
+      torrent = await addTorrent(magnet.magnet_url, 18000);
     } catch (err) {
       // Se falhou ao conectar (timeout), tenta buscar do cache no banco de dados
       if (magnet.files) {

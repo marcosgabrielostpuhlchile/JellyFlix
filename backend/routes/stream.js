@@ -187,6 +187,9 @@ router.get('/:id/:fileIndex', async (req, res) => {
         if (!file) {
           return res.status(404).json({ error: 'Arquivo de vídeo não encontrado neste torrent.' });
         }
+        if (typeof file.select === 'function') {
+          file.select();
+        }
         fileSize = file.length;
         fileName = file.name;
       } catch (err) {
@@ -196,8 +199,12 @@ router.get('/:id/:fileIndex', async (req, res) => {
         const existing = infoHash ? ((await wt.get(infoHash)) || wt.torrents.find(t => t.infoHash && t.infoHash.toLowerCase() === infoHash)) : null;
         if (existing && existing.files && existing.files[idx]) {
           torrent = existing;
-          fileSize = existing.files[idx].length;
-          fileName = existing.files[idx].name;
+          const targetF = existing.files[idx];
+          if (targetF && typeof targetF.select === 'function') {
+            targetF.select();
+          }
+          fileSize = targetF.length;
+          fileName = targetF.name;
         } else {
           throw err;
         }

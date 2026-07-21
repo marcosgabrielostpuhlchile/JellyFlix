@@ -12,6 +12,11 @@ let client = null;
 
 // Lista de trackers públicos de alta disponibilidade para acelerar conexões P2P e resgatar magnet links sem trackers integrados
 const DEFAULT_TRACKERS = [
+  'http://tracker.opentrackr.org:1337/announce',
+  'https://tracker.tamersrealm.org:443/announce',
+  'https://tracker.gbitt.info:443/announce',
+  'http://tracker.files.fm:6969/announce',
+  'http://open.acgnxtracker.com:80/announce',
   'udp://tracker.opentrackr.org:1337/announce',
   'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce',
@@ -19,7 +24,6 @@ const DEFAULT_TRACKERS = [
   'udp://exodus.desync.com:6969/announce',
   'udp://open.demonii.com:1337/announce',
   'udp://tracker.openbittorrent.com:80/announce',
-  'http://tracker.opentrackr.org:1337/announce',
   'wss://tracker.openwebtorrent.com',
   'wss://tracker.btorrent.xyz',
   'wss://tracker.files.fm:7072/announce'
